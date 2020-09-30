@@ -1,3 +1,13 @@
+# Rust generate
 /target
 Cargo.lock
+
+# IDE
 .idea
+.vscode
+
+# Test Output & Source
+*.log
+*.c
+*.cpp
+*.s
