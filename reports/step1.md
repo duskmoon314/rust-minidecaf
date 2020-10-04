@@ -98,17 +98,21 @@ named!(
 );
 ```
 
-而对于标识符，则实现了判断下划线 `_` 的函数，再结合 `nom` 的 `alphanumeric0` 进行解析：
+而对于标识符，则使用库 `regex` 和 `nom` 配合进行解析：
 
 ```rust
 pub fn lex_identifiers(input: &str) -> IResult<&str, Token> {
-    let s = input.bytes().nth(0).unwrap();
-    if is_alphabetic(s) || is_underline(s) {
-        let (reset, start) = anychar(input)?;
-        let (reset, body) = alphanumeric0(reset)?;
-        Ok((reset, Token::Identifier(format!("{}{}", start, body))))
+    let re = regex::Regex::new(r"^[_A-Za-z]{1}\w*").unwrap();
+    if let Some(m) = re.find(input) {
+        Ok((
+            &input[m.end()..],
+            Token::Identifier(input[m.start()..m.end()].to_string()),
+        ))
     } else {
-        Err(Err::Error((input, nom::error::ErrorKind::AlphaNumeric)))
+        Err(Err::Error(error_position!(
+            input,
+            nom::error::ErrorKind::RegexpFind
+        )))
     }
 }
 ```

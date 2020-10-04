@@ -1,22 +1,20 @@
-use nom::character::complete::{alphanumeric0, anychar};
-use nom::character::is_alphabetic;
 use nom::IResult;
 use nom::*;
 
 use crate::lexer::token::*;
 
-pub fn is_underline(chr: u8) -> bool {
-    chr == 0x5F
-}
-
 pub fn lex_identifiers(input: &str) -> IResult<&str, Token> {
-    let s = input.bytes().nth(0).unwrap();
-    if is_alphabetic(s) || is_underline(s) {
-        let (reset, start) = anychar(input)?;
-        let (reset, body) = alphanumeric0(reset)?;
-        Ok((reset, Token::Identifier(format!("{}{}", start, body))))
+    let re = regex::Regex::new(r"^[_A-Za-z]{1}\w*").unwrap();
+    if let Some(m) = re.find(input) {
+        Ok((
+            &input[m.end()..],
+            Token::Identifier(input[m.start()..m.end()].to_string()),
+        ))
     } else {
-        Err(Err::Error((input, nom::error::ErrorKind::AlphaNumeric)))
+        Err(Err::Error(error_position!(
+            input,
+            nom::error::ErrorKind::RegexpFind
+        )))
     }
 }
 
@@ -28,6 +26,14 @@ mod tests {
         assert_eq!(
             lex_identifiers("_a1b2c3 aaa"),
             Ok((" aaa", Token::Identifier("_a1b2c3".to_string())))
+        );
+        assert_eq!(
+            lex_identifiers("a1_b 2"),
+            Ok((" 2", Token::Identifier("a1_b".to_string())))
+        );
+        assert_eq!(
+            lex_identifiers("1a"),
+            Err(Err::Error(("1a", nom::error::ErrorKind::RegexpFind)))
         );
     }
 }
