@@ -21,6 +21,17 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    addi  sp, sp, 4")?;
                 writeln!(w, "    jr    ra")?;
             }
+            IRStatement::Neg | IRStatement::Not | IRStatement::LogicalNot => {
+                let op = match s {
+                    IRStatement::Neg => "neg",
+                    IRStatement::Not => "not",
+                    IRStatement::LogicalNot => "seqz",
+                    _ => panic!("Can't be"),
+                };
+                writeln!(w, "    lw    t1, 0(sp)")?;
+                writeln!(w, "    {}   t1, t1", op)?;
+                writeln!(w, "    sw    t1, 0(sp)")?;
+            }
         }
     }
     Ok(())

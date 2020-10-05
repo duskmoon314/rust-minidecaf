@@ -34,7 +34,7 @@ main:
 
 ### 实现
 
-我选择使用 `Rust` 语言，结合库 `nom` 来实现 `lexer`。使用 `Rust` 的`match`实现 `parser`，进而生成中间码和汇编。目前仅基于匹配实现了非常简单的 `lexer` 和 `parser`，后续可能考虑基于一些高级方法进行重构。
+我选择使用 `Rust` 语言，结合库 `nom` 来实现 `lexer`。使用 `Rust` 的 `match` 实现 `parser`，进而生成中间码和汇编。目前仅基于匹配实现了非常简单的 `lexer` 和 `parser`，后续可能考虑基于一些高级方法进行重构。
 
 同时我使用库 `clap` 实现一个更完善的命令行程序，在兼容原有的使用 `minidecaf <sourcecode>`将汇编打印到屏幕的同时，可以添加标志 `-lpi` 将 `lexer`、`parser` 和中间码输出到 `--log-file <log-file>` 中。这里还使用了库 `chrono` 获取使用程序的时间，一并输出到文件中。
 

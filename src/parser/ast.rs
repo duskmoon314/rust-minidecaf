@@ -7,7 +7,7 @@ use std::slice::Iter;
  * Function     -> Type Identifier Lparen Rparen Lbrace Statement Rbrace
  * Type         -> Type(Int | Double)
  * Statement    -> Return Expression Semicolon
- * Expression   -> Integer(i32)
+ * Expression   -> Integer(i32) | Unary(UnaryOp, Box<Expression>)
  */
 
 #[derive(Debug, PartialEq)]
@@ -30,6 +30,7 @@ pub enum Statement {
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     Const(i32),
+    Unary(Operator, Box<Expression>),
 }
 
 pub fn parse_factor(tokens: &mut Peekable<Iter<Token>>) -> Expression {
@@ -53,6 +54,10 @@ pub fn parse_factor(tokens: &mut Peekable<Iter<Token>>) -> Expression {
 pub fn parse_expression(tokens: &mut Peekable<Iter<Token>>) -> Expression {
     match tokens.next() {
         Some(Token::Integer(int)) => return Expression::Const(*int),
+        Some(Token::Operator(unary_op)) if unary_op.is_unary() => {
+            let expr = parse_expression(tokens);
+            return Expression::Unary(*unary_op, Box::new(expr));
+        }
         _ => panic!("Now can only parse an integer"),
     }
 }
@@ -133,7 +138,12 @@ mod tests {
         assert_eq!(
             parse_expression(&mut tokens.iter().peekable()),
             Expression::Const(123)
-        )
+        );
+        let tokens = vec![Token::Operator(Operator::Minus), Token::Integer(10)];
+        assert_eq!(
+            parse_expression(&mut tokens.iter().peekable()),
+            Expression::Unary(Operator::Minus, Box::new(Expression::Const(10)))
+        );
     }
 
     #[test]
