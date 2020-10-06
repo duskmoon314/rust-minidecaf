@@ -73,7 +73,7 @@ pub fn ir_expr(ir_statements: &mut Vec<IRStatement>, expr: &Expression) {
                 _ => panic!("Expecting unary operators"),
             };
         }
-        Expression::Multiplicative(left, op, right) | Expression::Additive(left, op, right) => {
+        Expression::Binary(op, left, right) => {
             ir_expr(ir_statements, left);
             ir_expr(ir_statements, right);
             match *op {
@@ -115,13 +115,13 @@ mod tests {
                 IRStatement::Neg
             ]
         );
-        let expr = Expression::Additive(
-            Box::new(Expression::Multiplicative(
-                Box::new(Expression::Const(1)),
+        let expr = Expression::Binary(
+            Operator::Plus,
+            Box::new(Expression::Binary(
                 Operator::Asterisk,
+                Box::new(Expression::Const(1)),
                 Box::new(Expression::Const(2)),
             )),
-            Operator::Plus,
             Box::new(Expression::Const(3)),
         );
         let mut ir_stmt: Vec<IRStatement> = Vec::new();

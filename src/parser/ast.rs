@@ -9,10 +9,13 @@ use std::slice::Iter;
  * Statement    -> Return Expression Semicolon
  * Expression   ->  | Additive
  * Factor       ->  | Integer(i32)
- *                  | Unary(UnaryOp, Unary)
+ *                  | ~ ! - Factor
  *                  | ( Expression )
- * Multiplicative -> Factor | Factor * / % Factor
- * Additive     -> Multiplicative | Multiplicative + - Multiplicative
+ * Multiplicative -> Factor | Multiplicative * / % Factor
+ * Additive     -> Multiplicative | Additive + - Multiplicative
+ * Relational   -> Additive | Relational < > <= >= Additive
+ * Equality     -> Relational | Equality == != Relational
+ * Logical      ->
  */
 
 #[derive(Debug, PartialEq)]
@@ -36,8 +39,11 @@ pub enum Statement {
 pub enum Expression {
     Const(i32),
     Unary(Operator, Box<Expression>),
-    Additive(Box<Expression>, Operator, Box<Expression>),
-    Multiplicative(Box<Expression>, Operator, Box<Expression>),
+    Binary(Operator, Box<Expression>, Box<Expression>), // Binary Operations (+ a b)
+                                                        // Additive(Box<Expression>, Operator, Box<Expression>),
+                                                        // Multiplicative(Box<Expression>, Operator, Box<Expression>)
+                                                        // Relational(Box<Expression>, Operator, Box<Expression>)
+                                                        // Equality(Box<Expression>, Operator, Box<Expression>)
 }
 
 // Factor => (<expression>) | Unary | Const(i32)
@@ -71,8 +77,7 @@ pub fn parse_multiplicative(tokens: &mut Peekable<Iter<Token>>) -> Expression {
             Some(Token::Operator(mul_op)) if mul_op.is_multiplicative() => {
                 tokens.next();
                 let r_factor = parse_factor(tokens);
-                l_factor =
-                    Expression::Multiplicative(Box::new(l_factor), *mul_op, Box::new(r_factor))
+                l_factor = Expression::Binary(*mul_op, Box::new(l_factor), Box::new(r_factor))
             }
             _ => break,
         }
@@ -88,13 +93,16 @@ pub fn parse_additive(tokens: &mut Peekable<Iter<Token>>) -> Expression {
             Some(Token::Operator(add_op)) if add_op.is_additive() => {
                 tokens.next();
                 let r_factor = parse_multiplicative(tokens);
-                l_factor = Expression::Additive(Box::new(l_factor), *add_op, Box::new(r_factor))
+                l_factor = Expression::Binary(*add_op, Box::new(l_factor), Box::new(r_factor))
             }
             _ => break,
         }
     }
     l_factor
 }
+
+// Relational => Additive < > <= >= Additive
+// pub fn parse_relational(tokens: &mut Peekable<Iter<Token>>) -> Expression {}
 
 pub fn parse_expression(tokens: &mut Peekable<Iter<Token>>) -> Expression {
     parse_additive(tokens)
@@ -176,9 +184,9 @@ mod tests {
         ];
         assert_eq!(
             parse_multiplicative(&mut tokens.iter().peekable()),
-            Expression::Multiplicative(
-                Box::new(Expression::Const(1)),
+            Expression::Binary(
                 Operator::Asterisk,
+                Box::new(Expression::Const(1)),
                 Box::new(Expression::Const(2))
             )
         );
@@ -193,12 +201,12 @@ mod tests {
         ];
         assert_eq!(
             parse_multiplicative(&mut tokens.iter().peekable()),
-            Expression::Multiplicative(
+            Expression::Binary(
+                Operator::Slash,
                 Box::new(Expression::Unary(
                     Operator::Minus,
                     Box::new(Expression::Const(1))
                 )),
-                Operator::Slash,
                 Box::new(Expression::Const(1))
             )
         );
@@ -218,15 +226,15 @@ mod tests {
         ];
         assert_eq!(
             parse_additive(&mut tokens.iter().peekable()),
-            Expression::Additive(
-                Box::new(Expression::Const(1)),
+            Expression::Binary(
                 Operator::Plus,
-                Box::new(Expression::Multiplicative(
+                Box::new(Expression::Const(1)),
+                Box::new(Expression::Binary(
+                    Operator::Slash,
                     Box::new(Expression::Unary(
                         Operator::Minus,
                         Box::new(Expression::Const(1))
                     )),
-                    Operator::Slash,
                     Box::new(Expression::Const(1))
                 ))
             )
