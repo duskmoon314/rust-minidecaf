@@ -7,7 +7,12 @@ use std::slice::Iter;
  * Function     -> Type Identifier Lparen Rparen Lbrace Statement Rbrace
  * Type         -> Type(Int | Double)
  * Statement    -> Return Expression Semicolon
- * Expression   -> Integer(i32) | Unary(UnaryOp, Box<Expression>)
+ * Expression   ->  | Additive
+ * Factor       ->  | Integer(i32)
+ *                  | Unary(UnaryOp, Unary)
+ *                  | ( Expression )
+ * Multiplicative -> Factor | Factor * / % Factor
+ * Additive     -> Multiplicative | Multiplicative + - Multiplicative
  */
 
 #[derive(Debug, PartialEq)]
@@ -31,8 +36,11 @@ pub enum Statement {
 pub enum Expression {
     Const(i32),
     Unary(Operator, Box<Expression>),
+    Additive(Box<Expression>, Operator, Box<Expression>),
+    Multiplicative(Box<Expression>, Operator, Box<Expression>),
 }
 
+// Factor => (<expression>) | Unary | Const(i32)
 pub fn parse_factor(tokens: &mut Peekable<Iter<Token>>) -> Expression {
     match tokens.next() {
         Some(next) => match next {
@@ -44,6 +52,10 @@ pub fn parse_factor(tokens: &mut Peekable<Iter<Token>>) -> Expression {
                     Some(_) | None => panic!("Missing ) to close expression"),
                 }
             }
+            Token::Operator(unary_op) if unary_op.is_unary() => {
+                let expr = parse_factor(tokens);
+                return Expression::Unary(*unary_op, Box::new(expr));
+            }
             Token::Integer(num) => return Expression::Const(*num), // <int>
             _ => panic!("Expected factor, Nothing found"),
         },
@@ -51,15 +63,41 @@ pub fn parse_factor(tokens: &mut Peekable<Iter<Token>>) -> Expression {
     }
 }
 
-pub fn parse_expression(tokens: &mut Peekable<Iter<Token>>) -> Expression {
-    match tokens.next() {
-        Some(Token::Integer(int)) => return Expression::Const(*int),
-        Some(Token::Operator(unary_op)) if unary_op.is_unary() => {
-            let expr = parse_expression(tokens);
-            return Expression::Unary(*unary_op, Box::new(expr));
+// Multiplicative => factor * / % factor
+pub fn parse_multiplicative(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_factor(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(mul_op)) if mul_op.is_multiplicative() => {
+                tokens.next();
+                let r_factor = parse_factor(tokens);
+                l_factor =
+                    Expression::Multiplicative(Box::new(l_factor), *mul_op, Box::new(r_factor))
+            }
+            _ => break,
         }
-        _ => panic!("Now can only parse an integer"),
     }
+    l_factor
+}
+
+// Additive => Multiplicative + - Multiplicative
+pub fn parse_additive(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_multiplicative(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(add_op)) if add_op.is_additive() => {
+                tokens.next();
+                let r_factor = parse_multiplicative(tokens);
+                l_factor = Expression::Additive(Box::new(l_factor), *add_op, Box::new(r_factor))
+            }
+            _ => break,
+        }
+    }
+    l_factor
+}
+
+pub fn parse_expression(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    parse_additive(tokens)
 }
 
 pub fn parse_statement(tokens: &mut Peekable<Iter<Token>>) -> Statement {
@@ -128,6 +166,72 @@ pub fn parse_program(tokens: &mut Peekable<Iter<Token>>) -> Program {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_multiplicative() {
+        let tokens = vec![
+            Token::Integer(1),
+            Token::Operator(Operator::Asterisk),
+            Token::Integer(2),
+        ];
+        assert_eq!(
+            parse_multiplicative(&mut tokens.iter().peekable()),
+            Expression::Multiplicative(
+                Box::new(Expression::Const(1)),
+                Operator::Asterisk,
+                Box::new(Expression::Const(2))
+            )
+        );
+        let tokens = vec![
+            Token::Operator(Operator::Minus),
+            Token::Integer(1),
+            Token::Operator(Operator::Slash),
+            Token::Symbol(Symbol::Lparen),
+            Token::Integer(1),
+            Token::Symbol(Symbol::Rparen),
+            Token::Symbol(Symbol::Semicolon),
+        ];
+        assert_eq!(
+            parse_multiplicative(&mut tokens.iter().peekable()),
+            Expression::Multiplicative(
+                Box::new(Expression::Unary(
+                    Operator::Minus,
+                    Box::new(Expression::Const(1))
+                )),
+                Operator::Slash,
+                Box::new(Expression::Const(1))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_additive() {
+        let tokens = vec![
+            Token::Integer(1),
+            Token::Operator(Operator::Plus),
+            Token::Operator(Operator::Minus),
+            Token::Integer(1),
+            Token::Operator(Operator::Slash),
+            Token::Symbol(Symbol::Lparen),
+            Token::Integer(1),
+            Token::Symbol(Symbol::Rparen),
+        ];
+        assert_eq!(
+            parse_additive(&mut tokens.iter().peekable()),
+            Expression::Additive(
+                Box::new(Expression::Const(1)),
+                Operator::Plus,
+                Box::new(Expression::Multiplicative(
+                    Box::new(Expression::Unary(
+                        Operator::Minus,
+                        Box::new(Expression::Const(1))
+                    )),
+                    Operator::Slash,
+                    Box::new(Expression::Const(1))
+                ))
+            )
+        );
+    }
 
     #[test]
     fn test_parse_expression() {

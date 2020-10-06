@@ -36,6 +36,7 @@ pub enum Symbol {
  * | BitwiseOr
  * ! Not
  * ~ BitwiseNot
+ * % Percent
  */
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -51,12 +52,25 @@ pub enum Operator {
     BitwiseOr,
     Not,
     BitwiseNot,
+    Percent,
 }
 
 impl Operator {
     pub fn is_unary(&self) -> bool {
         match self {
             Operator::Minus | Operator::Not | Operator::BitwiseNot => true,
+            _ => false,
+        }
+    }
+    pub fn is_multiplicative(&self) -> bool {
+        match self {
+            Operator::Asterisk | Operator::Slash | Operator::Percent => true,
+            _ => false,
+        }
+    }
+    pub fn is_additive(&self) -> bool {
+        match self {
+            Operator::Plus | Operator::Minus => true,
             _ => false,
         }
     }

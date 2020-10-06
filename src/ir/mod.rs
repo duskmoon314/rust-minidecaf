@@ -4,8 +4,16 @@ use crate::parser::ast::*;
 /*
  * IR command
  *
- * push x   : put x in stack, stack_pointer + 1
- * ret      : pop stack top, stack_pointer - 1
+ * push x       : put x in stack, stack_pointer + 1
+ * ret          : pop stack top, stack_pointer - 1
+ * Neg          : pop, neg, push back
+ * Not          : pop, bitwise not, push back
+ * LogicalNot   : pop, cpp-like logical not, push back
+ * add          : pop twice, add, push ans back, stack_pointer - 1
+ * sub          : pop twice, sub, push ans back, stack_pointer - 1
+ * mul
+ * div
+ * rem
  */
 
 #[derive(Debug, PartialEq)]
@@ -14,6 +22,11 @@ pub enum IRStatement {
     Neg,
     Not,
     LogicalNot,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
     Return,
 }
 
@@ -60,10 +73,23 @@ pub fn ir_expr(ir_statements: &mut Vec<IRStatement>, expr: &Expression) {
                 _ => panic!("Expecting unary operators"),
             };
         }
+        Expression::Multiplicative(left, op, right) | Expression::Additive(left, op, right) => {
+            ir_expr(ir_statements, left);
+            ir_expr(ir_statements, right);
+            match *op {
+                Operator::Asterisk => ir_statements.push(IRStatement::Mul),
+                Operator::Slash => ir_statements.push(IRStatement::Div),
+                Operator::Percent => ir_statements.push(IRStatement::Rem),
+                Operator::Plus => ir_statements.push(IRStatement::Add),
+                Operator::Minus => ir_statements.push(IRStatement::Sub),
+                _ => panic!("Expecting multiplicative operators"),
+            }
+        }
         _ => (),
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -89,5 +115,26 @@ mod tests {
                 IRStatement::Neg
             ]
         );
+        let expr = Expression::Additive(
+            Box::new(Expression::Multiplicative(
+                Box::new(Expression::Const(1)),
+                Operator::Asterisk,
+                Box::new(Expression::Const(2)),
+            )),
+            Operator::Plus,
+            Box::new(Expression::Const(3)),
+        );
+        let mut ir_stmt: Vec<IRStatement> = Vec::new();
+        ir_expr(&mut ir_stmt, &expr);
+        assert_eq!(
+            ir_stmt,
+            [
+                IRStatement::Push(1),
+                IRStatement::Push(2),
+                IRStatement::Mul,
+                IRStatement::Push(3),
+                IRStatement::Add
+            ]
+        )
     }
 }

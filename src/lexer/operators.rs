@@ -15,7 +15,8 @@ named!(
         tag!("||")  => { |_| Token::Operator(Operator::Or)}         |
         tag!("|")   => { |_| Token::Operator(Operator::BitwiseOr)}  |
         tag!("!")   => { |_| Token::Operator(Operator::Not)}        |
-        tag!("~")   => { |_| Token::Operator(Operator::BitwiseNot)}
+        tag!("~")   => { |_| Token::Operator(Operator::BitwiseNot)} |
+        tag!("%")   => { |_| Token::Operator(Operator::Percent)}
     )
 );
 
