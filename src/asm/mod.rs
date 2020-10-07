@@ -3,6 +3,7 @@ use std::io::Write;
 
 use crate::ir::*;
 
+#[allow(unreachable_patterns)]
 pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
     let ir_function = &ir_program.function;
     writeln!(w, "    .text")?;

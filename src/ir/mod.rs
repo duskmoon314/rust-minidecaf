@@ -77,6 +77,7 @@ pub fn ir_func(function: &Function) -> IRFunction {
     }
 }
 
+#[allow(unreachable_patterns)]
 pub fn ir_expr(ir_statements: &mut Vec<IRStatement>, expr: &Expression) {
     match expr {
         Expression::Const(int32) => ir_statements.push(IRStatement::Push(*int32)),
