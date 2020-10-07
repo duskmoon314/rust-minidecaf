@@ -14,9 +14,15 @@ named!(
         tag!("&")   => { |_| Token::Operator(Operator::BitwiseAnd)} |
         tag!("||")  => { |_| Token::Operator(Operator::Or)}         |
         tag!("|")   => { |_| Token::Operator(Operator::BitwiseOr)}  |
+        tag!("!=")  => { |_| Token::Operator(Operator::NEQ)}        |
         tag!("!")   => { |_| Token::Operator(Operator::Not)}        |
         tag!("~")   => { |_| Token::Operator(Operator::BitwiseNot)} |
-        tag!("%")   => { |_| Token::Operator(Operator::Percent)}
+        tag!("%")   => { |_| Token::Operator(Operator::Percent)}    |
+        tag!("==")  => { |_| Token::Operator(Operator::EQ)}         |
+        tag!("<=")  => { |_| Token::Operator(Operator::LE)}         |
+        tag!("<")   => { |_| Token::Operator(Operator::LT)}         |
+        tag!(">=")  => { |_| Token::Operator(Operator::GE)}         |
+        tag!(">")   => { |_| Token::Operator(Operator::GT)}
     )
 );
 
@@ -62,12 +68,28 @@ mod tests {
             Ok(((" "), Token::Operator(Operator::BitwiseOr)))
         );
         assert_eq!(
-            lex_operators("!"),
-            Ok(((""), Token::Operator(Operator::Not)))
+            lex_operators("! "),
+            Ok(((" "), Token::Operator(Operator::Not)))
         );
         assert_eq!(
             lex_operators("~"),
             Ok(((""), Token::Operator(Operator::BitwiseNot)))
+        );
+        assert_eq!(
+            lex_operators("!="),
+            Ok(((""), Token::Operator(Operator::NEQ)))
+        );
+        assert_eq!(
+            lex_operators("=="),
+            Ok(((""), Token::Operator(Operator::EQ)))
+        );
+        assert_eq!(
+            lex_operators("<="),
+            Ok(((""), Token::Operator(Operator::LE)))
+        );
+        assert_eq!(
+            lex_operators(">="),
+            Ok(((""), Token::Operator(Operator::GE)))
         );
     }
 }

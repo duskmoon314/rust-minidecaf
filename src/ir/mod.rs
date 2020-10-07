@@ -14,6 +14,14 @@ use crate::parser::ast::*;
  * mul
  * div
  * rem
+ * eq           : pop twice, push eq ? 1 : 0, stack_pointer - 1
+ * ne
+ * le
+ * ge
+ * lt
+ * gt
+ * LogicalAnd
+ * LogicalOr
  */
 
 #[derive(Debug, PartialEq)]
@@ -27,6 +35,14 @@ pub enum IRStatement {
     Mul,
     Div,
     Rem,
+    EQ,
+    NEQ,
+    LE,
+    GE,
+    LT,
+    GT,
+    LogicalAnd,
+    LogicalOr,
     Return,
 }
 
@@ -82,7 +98,15 @@ pub fn ir_expr(ir_statements: &mut Vec<IRStatement>, expr: &Expression) {
                 Operator::Percent => ir_statements.push(IRStatement::Rem),
                 Operator::Plus => ir_statements.push(IRStatement::Add),
                 Operator::Minus => ir_statements.push(IRStatement::Sub),
-                _ => panic!("Expecting multiplicative operators"),
+                Operator::LT => ir_statements.push(IRStatement::LT),
+                Operator::GT => ir_statements.push(IRStatement::GT),
+                Operator::LE => ir_statements.push(IRStatement::LE),
+                Operator::GE => ir_statements.push(IRStatement::GE),
+                Operator::EQ => ir_statements.push(IRStatement::EQ),
+                Operator::NEQ => ir_statements.push(IRStatement::NEQ),
+                Operator::And => ir_statements.push(IRStatement::LogicalAnd),
+                Operator::Or => ir_statements.push(IRStatement::LogicalOr),
+                _ => panic!("Expecting binary operators"),
             }
         }
         _ => (),

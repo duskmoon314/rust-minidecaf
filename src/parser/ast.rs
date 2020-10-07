@@ -7,7 +7,7 @@ use std::slice::Iter;
  * Function     -> Type Identifier Lparen Rparen Lbrace Statement Rbrace
  * Type         -> Type(Int | Double)
  * Statement    -> Return Expression Semicolon
- * Expression   ->  | Additive
+ * Expression   ->  | Logical_Or
  * Factor       ->  | Integer(i32)
  *                  | ~ ! - Factor
  *                  | ( Expression )
@@ -15,7 +15,8 @@ use std::slice::Iter;
  * Additive     -> Multiplicative | Additive + - Multiplicative
  * Relational   -> Additive | Relational < > <= >= Additive
  * Equality     -> Relational | Equality == != Relational
- * Logical      ->
+ * Logical_And  -> Equality | Logical_And && Equality
+ * Logical_Or   -> Logical_And | Logical_Or || Logical_And
  */
 
 #[derive(Debug, PartialEq)]
@@ -102,10 +103,71 @@ pub fn parse_additive(tokens: &mut Peekable<Iter<Token>>) -> Expression {
 }
 
 // Relational => Additive < > <= >= Additive
-// pub fn parse_relational(tokens: &mut Peekable<Iter<Token>>) -> Expression {}
+pub fn parse_relational(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_additive(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(rt_op)) if rt_op.is_relational() => {
+                tokens.next();
+                let r_factor = parse_additive(tokens);
+                l_factor = Expression::Binary(*rt_op, Box::new(l_factor), Box::new(r_factor))
+            }
+            _ => break,
+        }
+    }
+    l_factor
+}
+
+// Equality => Relational == != Relational
+pub fn parse_equality(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_relational(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(eq_op)) if eq_op.is_equality() => {
+                tokens.next();
+                let r_factor = parse_relational(tokens);
+                l_factor = Expression::Binary(*eq_op, Box::new(l_factor), Box::new(r_factor))
+            }
+            _ => break,
+        }
+    }
+    l_factor
+}
+
+// Logical_And => Equality && Equality
+pub fn parse_logical_and(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_equality(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(Operator::And)) => {
+                tokens.next();
+                let r_factor = parse_equality(tokens);
+                l_factor = Expression::Binary(Operator::And, Box::new(l_factor), Box::new(r_factor))
+            }
+            _ => break,
+        }
+    }
+    l_factor
+}
+
+// Logical_Or => Logical_And && Logical_And
+pub fn parse_logical_or(tokens: &mut Peekable<Iter<Token>>) -> Expression {
+    let mut l_factor = parse_logical_and(tokens);
+    loop {
+        match tokens.peek() {
+            Some(Token::Operator(Operator::Or)) => {
+                tokens.next();
+                let r_factor = parse_logical_and(tokens);
+                l_factor = Expression::Binary(Operator::Or, Box::new(l_factor), Box::new(r_factor))
+            }
+            _ => break,
+        }
+    }
+    l_factor
+}
 
 pub fn parse_expression(tokens: &mut Peekable<Iter<Token>>) -> Expression {
-    parse_additive(tokens)
+    parse_logical_or(tokens)
 }
 
 pub fn parse_statement(tokens: &mut Peekable<Iter<Token>>) -> Statement {
@@ -237,6 +299,58 @@ mod tests {
                     )),
                     Box::new(Expression::Const(1))
                 ))
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_relational() {
+        let tokens = vec![
+            Token::Integer(1),
+            Token::Operator(Operator::LT),
+            Token::Integer(2),
+        ];
+        assert_eq!(
+            parse_relational(&mut tokens.iter().peekable()),
+            Expression::Binary(
+                Operator::LT,
+                Box::new(Expression::Const(1)),
+                Box::new(Expression::Const(2))
+            )
+        )
+    }
+
+    #[test]
+    fn test_parse_logical() {
+        let tokens = vec![
+            Token::Integer(1),
+            Token::Operator(Operator::NEQ),
+            Token::Integer(2),
+            Token::Operator(Operator::And),
+            Token::Integer(1),
+            Token::Operator(Operator::EQ),
+            Token::Integer(1),
+            Token::Operator(Operator::Or),
+            Token::Integer(1),
+        ];
+        assert_eq!(
+            parse_logical_or(&mut tokens.iter().peekable()),
+            Expression::Binary(
+                Operator::Or,
+                Box::new(Expression::Binary(
+                    Operator::And,
+                    Box::new(Expression::Binary(
+                        Operator::NEQ,
+                        Box::new(Expression::Const(1)),
+                        Box::new(Expression::Const(2))
+                    )),
+                    Box::new(Expression::Binary(
+                        Operator::EQ,
+                        Box::new(Expression::Const(1)),
+                        Box::new(Expression::Const(1))
+                    ))
+                )),
+                Box::new(Expression::Const(1))
             )
         );
     }

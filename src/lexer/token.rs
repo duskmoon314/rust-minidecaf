@@ -34,9 +34,15 @@ pub enum Symbol {
  * & BitwiseAnd
  * || Or
  * | BitwiseOr
+ * != NEQ
  * ! Not
  * ~ BitwiseNot
  * % Percent
+ * == EQ
+ * < LT
+ * > GT
+ * <= LE
+ * >= GE
  */
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -53,6 +59,12 @@ pub enum Operator {
     Not,
     BitwiseNot,
     Percent,
+    EQ,
+    NEQ,
+    LT,
+    GT,
+    LE,
+    GE,
 }
 
 impl Operator {
@@ -71,6 +83,18 @@ impl Operator {
     pub fn is_additive(&self) -> bool {
         match self {
             Operator::Plus | Operator::Minus => true,
+            _ => false,
+        }
+    }
+    pub fn is_relational(&self) -> bool {
+        match self {
+            Operator::LT | Operator::LE | Operator::GT | Operator::GE => true,
+            _ => false,
+        }
+    }
+    pub fn is_equality(&self) -> bool {
+        match self {
+            Operator::EQ | Operator::NEQ => true,
             _ => false,
         }
     }
