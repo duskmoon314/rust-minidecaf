@@ -165,7 +165,7 @@ Expression::Unary(
 ]
 ```
 
-### `asm`
+#### `asm`
 
 这三个一元运算都是改变栈顶，汇编逻辑为取出栈顶的数、进行运算、存回栈顶。使用 gcc 确认对应汇编指令后，实现代码如下：
 
@@ -183,7 +183,7 @@ IRStatement::Neg | IRStatement::Not | IRStatement::LogicalNot => {
 }
 ```
 
-### 结果
+#### 结果
 
 以测例中一段代码为例：
 
