@@ -11,3 +11,4 @@ Cargo.lock
 *.c
 *.cpp
 *.s
+*.out

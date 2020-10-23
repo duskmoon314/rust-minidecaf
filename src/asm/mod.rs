@@ -9,7 +9,15 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
     writeln!(w, "    .text")?;
     writeln!(w, "    .global {}", ir_function.name)?;
     writeln!(w, "{}:", ir_function.name)?;
-    for s in &ir_function.statement {
+
+    writeln!(w, "{}_prologue:", ir_function.name)?;
+    let frame_size: u32 = ir_function.scope.symbol_map.len() as u32 * 4 + 8;
+    writeln!(w, "    addi  sp, sp, -{}", frame_size)?;
+    writeln!(w, "    sw    ra, {}(sp)", frame_size - 4)?;
+    writeln!(w, "    sw    fp, {}(sp)", frame_size - 8)?;
+    writeln!(w, "    addi  fp, sp, {}", frame_size)?;
+
+    for s in &ir_function.scope.statements {
         writeln!(w, "# {:?}", s)?;
         match s {
             IRStatement::Push(int32) => {
@@ -20,7 +28,7 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
             IRStatement::Return => {
                 writeln!(w, "    lw    a0, 0(sp)")?;
                 writeln!(w, "    addi  sp, sp, 4")?;
-                writeln!(w, "    jr    ra")?;
+                writeln!(w, "    j     {}_epilogue", ir_function.name)?;
             }
             IRStatement::Neg | IRStatement::Not | IRStatement::LogicalNot => {
                 let op = match s {
@@ -99,8 +107,47 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    snez  t1, t1")?;
                 writeln!(w, "    sw    t1, 0(sp)")?;
             }
+            IRStatement::FrameAddr(iter, idx) => {
+                let mut i = *iter;
+                writeln!(w, "    mv    t1, fp")?;
+                loop {
+                    if i == 0 {
+                        break;
+                    } else {
+                        // load old fp
+                        writeln!(w, "    lw    t1, -4(t1)")?;
+                        i = i - 1;
+                    }
+                }
+                writeln!(w, "    li    t2, {}", *idx)?;
+                writeln!(w, "    slli  t2, t2, 2")?;
+                writeln!(w, "    addi  t2, t2, 12")?;
+                writeln!(w, "    sub   t1, t1, t2")?;
+                writeln!(w, "    addi  sp, sp, -4")?;
+                writeln!(w, "    sw    t1, 0(sp)")?;
+            }
+            IRStatement::Load => {
+                writeln!(w, "    lw    t1, 0(sp)")?;
+                writeln!(w, "    lw    t1, 0(t1)")?;
+                writeln!(w, "    sw    t1, 0(sp)")?;
+            }
+            IRStatement::Store => {
+                writeln!(w, "    lw    t1, 4(sp)")?;
+                writeln!(w, "    lw    t2, 0(sp)")?;
+                writeln!(w, "    addi  sp, sp, 4")?;
+                writeln!(w, "    sw    t1, 0(t2)")?;
+            }
+            IRStatement::Pop => {
+                writeln!(w, "    addi  sp, sp, 4")?;
+            }
             _ => (),
         }
     }
+
+    writeln!(w, "{}_epilogue:", ir_function.name)?;
+    writeln!(w, "    lw    fp, {}(sp)", frame_size - 8)?;
+    writeln!(w, "    lw    ra, {}(sp)", frame_size - 4)?;
+    writeln!(w, "    addi  sp, sp, {}", frame_size)?;
+    writeln!(w, "    ret")?;
     Ok(())
 }

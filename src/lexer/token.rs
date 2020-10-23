@@ -43,6 +43,7 @@ pub enum Symbol {
  * > GT
  * <= LE
  * >= GE
+ * = Assign
  */
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -65,6 +66,7 @@ pub enum Operator {
     GT,
     LE,
     GE,
+    Assign,
 }
 
 impl Operator {
