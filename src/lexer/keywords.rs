@@ -5,7 +5,9 @@ use crate::lexer::token::*;
 named!(
     pub lex_keywords<&str, Token>,
     alt!(
-        tag!("return") => { |_| Token::Keyword(Keyword::Return)}
+        tag!("return")  => { |_| Token::Keyword(Keyword::Return)}   |
+        tag!("if")      => { |_| Token::Keyword(Keyword::If)}       |
+        tag!("else")    => { |_| Token::Keyword(Keyword::Else)}
     )
 );
 

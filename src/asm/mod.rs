@@ -20,6 +20,9 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
     for s in &ir_function.scope.statements {
         writeln!(w, "# {:?}", s)?;
         match s {
+            IRStatement::Comment(_) => {
+                // Use {:?} write comment already
+            }
             IRStatement::Push(int32) => {
                 writeln!(w, "    addi  sp, sp, -4")?;
                 writeln!(w, "    li    t1, {}", int32)?;
@@ -139,6 +142,22 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
             }
             IRStatement::Pop => {
                 writeln!(w, "    addi  sp, sp, 4")?;
+            }
+            IRStatement::Label(l) => {
+                writeln!(w, "{}:", l)?;
+            }
+            IRStatement::Br(l) => {
+                writeln!(w, "    j     {}", l)?;
+            }
+            IRStatement::Beqz(l) | IRStatement::Bnez(l) => {
+                let op = match s {
+                    IRStatement::Beqz(_) => "beqz",
+                    IRStatement::Bnez(_) => "bnez",
+                    _ => panic!("Expecting branch operation"),
+                };
+                writeln!(w, "    lw    t1, 0(sp)")?;
+                writeln!(w, "    addi  sp, sp, 4")?;
+                writeln!(w, "    {}  t1, {}", op, l)?;
             }
             _ => (),
         }

@@ -44,6 +44,8 @@ pub enum Symbol {
  * <= LE
  * >= GE
  * = Assign
+ * ? Condition
+ * : Colon
  */
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -67,6 +69,8 @@ pub enum Operator {
     LE,
     GE,
     Assign,
+    Condition,
+    Colon,
 }
 
 impl Operator {

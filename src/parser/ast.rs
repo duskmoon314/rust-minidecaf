@@ -6,9 +6,10 @@ use std::slice::Iter;
  * Program      -> Function
  * Function     -> Type Identifier Lparen Rparen Lbrace Statement* Rbrace
  * Type         -> Type(Int | Double)
+ * BlockItem    -> Statement | Declaration
  * Statement    ->  | Return Expression Semicolon
  *                  | Expression? Semicolon
- *                  | Declaration
+ *                  | If ( Expresion ) Statement (Else statement)?
  * Declaration  -> Type Identifier (= Expression)? Semicolon
  * Expression   ->  | Assignment
  * Factor       ->  | Integer(i32)
@@ -21,7 +22,8 @@ use std::slice::Iter;
  * Equality     -> Relational | Equality == != Relational
  * Logical_And  -> Equality | Logical_And && Equality
  * Logical_Or   -> Logical_And | Logical_Or || Logical_And
- * Assignment   -> Logical_Or | Identifier = Expression
+ * Conditional  -> Logical_Or | Logical_Or ? Expresion : Conditional
+ * Assignment   -> Conditional | Identifier = Expression
  */
 
 #[derive(Debug, PartialEq)]
@@ -41,6 +43,7 @@ pub enum Statement {
     Return(Expression),
     Declaration(Declaration),
     Expression(Option<Expression>),
+    Condition(Expression, Box<Statement>, Option<Box<Statement>>), // 由 parse 函数确保不会有 Declaration 作为子句
 }
 
 #[derive(Debug, PartialEq)]
@@ -59,8 +62,9 @@ pub enum Expression {
     // Multiplicative(Box<Expression>, Operator, Box<Expression>)
     // Relational(Box<Expression>, Operator, Box<Expression>)
     // Equality(Box<Expression>, Operator, Box<Expression>)
-    Assignment(String, Box<Expression>), // var = ();
-    Variable(String),                    // var
+    Ternary(Box<Expression>, Box<Expression>, Box<Expression>), // condition ? expression : ternary
+    Assignment(String, Box<Expression>),                        // var = ()
+    Variable(String),                                           // var
 }
 
 // Factor => (<expression>) | Unary | Const(i32)
@@ -183,7 +187,25 @@ pub fn parse_logical_or(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     l_factor
 }
 
-// Assignment => identifier = ? parse_assignment : parse_logical_or
+pub fn parse_conditional(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
+    let cond = parse_logical_or(tokens);
+    match tokens.peek() {
+        Some(Token::Operator(Operator::Condition)) => {
+            tokens.next();
+            let t_expr = parse_expression(tokens);
+            match tokens.next() {
+                Some(Token::Operator(Operator::Colon)) => {
+                    let f_expr = parse_conditional(tokens);
+                    Expression::Ternary(Box::new(cond), Box::new(t_expr), Box::new(f_expr))
+                }
+                _ => panic!("Conditional Error: Expecting : in ternary"),
+            }
+        }
+        _ => cond,
+    }
+}
+
+// Assignment => identifier = ? parse_assignment : parse_conditional
 pub fn parse_assignment(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     match tokens.peek() {
         Some(Token::Identifier(name)) => match tokens.peek_nth(1) {
@@ -193,9 +215,9 @@ pub fn parse_assignment(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
                 let expr = parse_expression(tokens);
                 Expression::Assignment(name.to_owned(), Box::new(expr))
             }
-            _ => parse_logical_or(tokens),
+            _ => parse_conditional(tokens),
         },
-        _ => parse_logical_or(tokens),
+        _ => parse_conditional(tokens),
     }
 }
 
@@ -243,9 +265,26 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
                 _ => panic!("Statement Err: Expecting ; at the end"),
             }
         }
-        Some(Token::Type(_)) => {
-            let decl = parse_declaration(tokens);
-            return Statement::Declaration(decl);
+        Some(Token::Keyword(Keyword::If)) => {
+            tokens.next(); // consume if
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Lparen)) => {}
+                _ => panic!("IfElse Error: Expecting ("),
+            }
+            let cond = parse_expression(tokens);
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Rparen)) => {}
+                _ => panic!("IfElse Error: Expecting )"),
+            }
+            let t_stmt = parse_statement(tokens);
+            match tokens.peek() {
+                Some(Token::Keyword(Keyword::Else)) => {
+                    tokens.next(); // consume else
+                    let f_stmt = parse_statement(tokens);
+                    Statement::Condition(cond, Box::new(t_stmt), Some(Box::new(f_stmt)))
+                }
+                _ => Statement::Condition(cond, Box::new(t_stmt), None),
+            }
         }
         Some(Token::Symbol(Symbol::Semicolon)) => {
             tokens.next();
@@ -263,6 +302,16 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
     }
 }
 
+pub fn parse_block_item(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
+    match tokens.peek() {
+        Some(Token::Type(_)) => {
+            let decl = parse_declaration(tokens);
+            return Statement::Declaration(decl);
+        }
+        _ => parse_statement(tokens),
+    }
+}
+
 pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
     match tokens.next() {
         Some(Token::Type(t)) => match t {
@@ -273,7 +322,7 @@ pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
                             Some(Token::Symbol(Symbol::Lbrace)) => {
                                 let mut statements: Vec<Statement> = Vec::new();
                                 while tokens.peek() != Some(&&Token::Symbol(Symbol::Rbrace)) {
-                                    statements.push(parse_statement(tokens));
+                                    statements.push(parse_block_item(tokens));
                                 }
                                 // check return
                                 match statements.last() {
@@ -495,6 +544,42 @@ mod tests {
         assert_eq!(
             parse_statement(&mut tokens.iter().peekable_nth()),
             Statement::Return(Expression::Const(0))
+        );
+    }
+
+    #[test]
+    fn test_parse_condition() {
+        /*
+         * if (1)
+         * if (2)
+         *     ;
+         * else
+         *     ;
+         */
+        let tokens = vec![
+            Token::Keyword(Keyword::If),
+            Token::Symbol(Symbol::Lparen),
+            Token::Integer(1),
+            Token::Symbol(Symbol::Rparen),
+            Token::Keyword(Keyword::If),
+            Token::Symbol(Symbol::Lparen),
+            Token::Integer(2),
+            Token::Symbol(Symbol::Rparen),
+            Token::Symbol(Symbol::Semicolon),
+            Token::Keyword(Keyword::Else),
+            Token::Symbol(Symbol::Semicolon),
+        ];
+        assert_eq!(
+            parse_statement(&mut tokens.iter().peekable_nth()),
+            Statement::Condition(
+                Expression::Const(1),
+                Box::new(Statement::Condition(
+                    Expression::Const(2),
+                    Box::new(Statement::Expression(None)),
+                    Some(Box::new(Statement::Expression(None)))
+                )),
+                None
+            )
         );
     }
 

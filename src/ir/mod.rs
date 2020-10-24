@@ -1,6 +1,10 @@
 use crate::lexer::token::*;
 use crate::parser::ast::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+type Label = String;
 
 /*
  * IR command
@@ -27,6 +31,11 @@ use std::collections::HashMap;
  * load         : pop, load, put back
  * store        : pop => addr, pop => value, save value to addr, stack_pointer - 1
  * pop          : pop, stack_pointer - 1
+ * label(str)   : do nothing, mark a destination for some j or branch command
+ * beqz(str)    : pop, if zero, jump to str, stack_pointer - 1
+ * bnez(str)    : pop, if not zero, jump to str, stack_pointer - 1
+ * br(str)      : jump to str
+ * comment(str) : write "# {str}" to asm file
  */
 
 #[derive(Debug, PartialEq)]
@@ -52,12 +61,24 @@ pub enum IRStatement {
     Load,
     Store,
     Pop,
+    Label(Label),
+    Br(Label),
+    Beqz(Label),
+    Bnez(Label),
+    Comment(String),
     Return,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct IRProgram {
     pub function: IRFunction,
+    pub label_cnt: Rc<RefCell<u32>>,
+}
+
+fn new_label(label_cnt: &Rc<RefCell<u32>>) -> u32 {
+    let cnt = *label_cnt.borrow();
+    *label_cnt.borrow_mut() += 1;
+    return cnt;
 }
 
 type SymbolMap = HashMap<String, u32>;
@@ -68,6 +89,7 @@ pub struct Scope {
     pub symbol_map: SymbolMap,
     parent: Option<Box<Scope>>,
     pub statements: Vec<IRStatement>,
+    pub label_cnt: Rc<RefCell<u32>>,
 }
 
 impl Scope {
@@ -88,19 +110,23 @@ impl Scope {
 pub struct IRFunction {
     pub name: String,
     pub scope: Scope,
+    pub label_cnt: Rc<RefCell<u32>>,
 }
 
 pub fn ir(program: &Program) -> IRProgram {
+    let label_cnt = Rc::new(RefCell::new(0));
     IRProgram {
-        function: ir_func(&program.function),
+        label_cnt: Rc::clone(&label_cnt),
+        function: ir_func(&program.function, &label_cnt),
     }
 }
 
-pub fn ir_func(function: &Function) -> IRFunction {
+pub fn ir_func(function: &Function, label_cnt: &Rc<RefCell<u32>>) -> IRFunction {
     let mut scope = Scope {
         symbol_map: SymbolMap::new(),
         parent: None,
         statements: Vec::new(),
+        label_cnt: Rc::clone(label_cnt),
     };
     for s in &function.statements {
         ir_stmt(&mut scope, s)
@@ -108,6 +134,7 @@ pub fn ir_func(function: &Function) -> IRFunction {
     IRFunction {
         name: function.name.to_owned(),
         scope: scope,
+        label_cnt: Rc::clone(label_cnt),
     }
 }
 
@@ -129,6 +156,39 @@ pub fn ir_stmt(scope: &mut Scope, statement: &Statement) {
             }
             None => {}
         },
+        Statement::Condition(cond, t_stmt, f_stmt) => {
+            let lable_id = new_label(&scope.label_cnt);
+            scope
+                .statements
+                .push(IRStatement::Comment(format!("If-Else Label: {}", lable_id)));
+            ir_expr(scope, cond);
+            match f_stmt {
+                None => {
+                    scope
+                        .statements
+                        .push(IRStatement::Beqz(format!("IfElse_End_{}", lable_id)));
+                    ir_stmt(scope, t_stmt);
+                    scope
+                        .statements
+                        .push(IRStatement::Label(format!("IfElse_End_{}", lable_id)));
+                }
+                Some(s) => {
+                    scope
+                        .statements
+                        .push(IRStatement::Beqz(format!("Else_{}", lable_id)));
+                    ir_stmt(scope, t_stmt);
+                    let mut stmts = vec![
+                        IRStatement::Br(format!("IfElse_End_{}", lable_id)),
+                        IRStatement::Label(format!("Else_{}", lable_id)),
+                    ];
+                    scope.statements.append(&mut stmts);
+                    ir_stmt(scope, s);
+                    scope
+                        .statements
+                        .push(IRStatement::Label(format!("IfElse_End_{}", lable_id)))
+                }
+            }
+        }
         _ => unimplemented!(),
     }
 }
@@ -198,6 +258,26 @@ pub fn ir_expr(scope: &mut Scope, expr: &Expression) {
             scope.statements.push(IRStatement::FrameAddr(iter, idx));
             scope.statements.push(IRStatement::Store);
         }
+        Expression::Ternary(cond, t_expr, f_expr) => {
+            let lable_id = new_label(&scope.label_cnt);
+            scope
+                .statements
+                .push(IRStatement::Comment(format!("Ternary Label: {}", lable_id)));
+            ir_expr(scope, cond);
+            scope
+                .statements
+                .push(IRStatement::Beqz(format!("Ternary_False_{}", lable_id)));
+            ir_expr(scope, t_expr);
+            let mut stmts = vec![
+                IRStatement::Br(format!("Ternary_End_{}", lable_id)),
+                IRStatement::Label(format!("Ternary_False_{}", lable_id)),
+            ];
+            scope.statements.append(&mut stmts);
+            ir_expr(scope, f_expr);
+            scope
+                .statements
+                .push(IRStatement::Label(format!("Ternary_End_{}", lable_id)))
+        }
         _ => (),
     }
 }
@@ -221,6 +301,7 @@ mod tests {
             symbol_map: SymbolMap::new(),
             parent: None,
             statements: Vec::new(),
+            label_cnt: Rc::new(RefCell::new(0)),
         };
         ir_expr(&mut scope, &expr);
         assert_eq!(
@@ -245,6 +326,7 @@ mod tests {
             symbol_map: SymbolMap::new(),
             parent: None,
             statements: Vec::new(),
+            label_cnt: Rc::new(RefCell::new(0)),
         };
         ir_expr(&mut scope, &expr);
         assert_eq!(
@@ -291,13 +373,16 @@ mod tests {
         };
         let mut s_map = SymbolMap::new();
         s_map.insert("a".to_string(), 0);
+        let label_cnt = Rc::new(RefCell::new(0));
         assert_eq!(
-            ir_func(&fun),
+            ir_func(&fun, &label_cnt),
             IRFunction {
                 name: "main".to_string(),
+                label_cnt: Rc::new(RefCell::new(0)),
                 scope: Scope {
                     parent: None,
                     symbol_map: s_map,
+                    label_cnt: Rc::new(RefCell::new(0)),
                     statements: vec![
                         // int a = 1;
                         IRStatement::Push(1),

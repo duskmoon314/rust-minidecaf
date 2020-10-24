@@ -23,7 +23,9 @@ named!(
         tag!("<")   => { |_| Token::Operator(Operator::LT)}         |
         tag!(">=")  => { |_| Token::Operator(Operator::GE)}         |
         tag!(">")   => { |_| Token::Operator(Operator::GT)}         |
-        tag!("=")   => { |_| Token::Operator(Operator::Assign)}
+        tag!("=")   => { |_| Token::Operator(Operator::Assign)}     |
+        tag!("?")   => { |_| Token::Operator(Operator::Condition)}  |
+        tag!(":")   => { |_| Token::Operator(Operator::Colon)}
     )
 );
 
