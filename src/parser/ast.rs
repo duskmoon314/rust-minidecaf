@@ -187,6 +187,7 @@ pub fn parse_logical_or(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     l_factor
 }
 
+// Conditional => cond ? t_expr : f_expr
 pub fn parse_conditional(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     let cond = parse_logical_or(tokens);
     match tokens.peek() {

@@ -2,7 +2,7 @@ use clap::Clap;
 
 #[derive(Clap)]
 #[clap(
-    version = "0.1.0",
+    version = "0.6.0",
     author = "duskmoon(hkp) <hkp18@mails.tsinghua.edu.cn>"
 )]
 struct Opts {
