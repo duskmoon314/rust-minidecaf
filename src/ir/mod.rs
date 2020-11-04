@@ -162,6 +162,9 @@ pub fn ir_func(
     for s in &function.statements {
         ir_stmt(&s, label_cnt, scope_stack, &mut var_max, &mut statements);
     }
+    let s = scope_stack.last_mut().unwrap();
+    var_max = max(var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
+    scope_stack.pop();
 
     return IRFunction {
         name: function.name.to_owned(),
