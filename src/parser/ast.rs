@@ -4,12 +4,14 @@ use std::slice::Iter;
 
 /*
  * Program      -> Function
- * Function     -> Type Identifier Lparen Rparen Lbrace Statement* Rbrace
+ * Function     -> Type Identifier Lparen Rparen Compound_Statement
  * Type         -> Type(Int | Double)
  * BlockItem    -> Statement | Declaration
+ * Compound_Statement -> Lbrace Statement* Rbrace
  * Statement    ->  | Return Expression Semicolon
  *                  | Expression? Semicolon
- *                  | If ( Expresion ) Statement (Else statement)?
+ *                  | If ( Expression ) Statement (Else statement)?
+ *                  | Compound_Statement
  * Declaration  -> Type Identifier (= Expression)? Semicolon
  * Expression   ->  | Assignment
  * Factor       ->  | Integer(i32)
@@ -22,7 +24,7 @@ use std::slice::Iter;
  * Equality     -> Relational | Equality == != Relational
  * Logical_And  -> Equality | Logical_And && Equality
  * Logical_Or   -> Logical_And | Logical_Or || Logical_And
- * Conditional  -> Logical_Or | Logical_Or ? Expresion : Conditional
+ * Conditional  -> Logical_Or | Logical_Or ? Expression : Conditional
  * Assignment   -> Conditional | Identifier = Expression
  */
 
@@ -44,6 +46,7 @@ pub enum Statement {
     Declaration(Declaration),
     Expression(Option<Expression>),
     Condition(Expression, Box<Statement>, Option<Box<Statement>>), // 由 parse 函数确保不会有 Declaration 作为子句
+    Compound(Vec<Statement>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -256,6 +259,16 @@ pub fn parse_declaration(tokens: &mut PeekableNth<Iter<Token>>) -> Declaration {
 
 pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
     match tokens.peek() {
+        Some(Token::Symbol(Symbol::Lbrace)) => {
+            // { statement* }
+            tokens.next(); // consume {
+            let mut stmts: Vec<Statement> = Vec::new();
+            while tokens.peek() != Some(&&Token::Symbol(Symbol::Rbrace)) {
+                stmts.push(parse_block_item(tokens));
+            }
+            tokens.next(); // consume }
+            return Statement::Compound(stmts);
+        }
         Some(Token::Keyword(Keyword::Return)) => {
             tokens.next();
             let expr = parse_expression(tokens);
@@ -545,6 +558,35 @@ mod tests {
         assert_eq!(
             parse_statement(&mut tokens.iter().peekable_nth()),
             Statement::Return(Expression::Const(0))
+        );
+
+        /*
+         * {
+         * a = 1 ? 1 : 0;
+         * }
+         */
+        let tokens = vec![
+            Token::Symbol(Symbol::Lbrace),
+            Token::Identifier("a".to_string()),
+            Token::Operator(Operator::Assign),
+            Token::Integer(1),
+            Token::Operator(Operator::Condition),
+            Token::Integer(1),
+            Token::Operator(Operator::Colon),
+            Token::Integer(0),
+            Token::Symbol(Symbol::Semicolon),
+            Token::Symbol(Symbol::Rbrace),
+        ];
+        assert_eq!(
+            parse_statement(&mut tokens.iter().peekable_nth()),
+            Statement::Compound(vec![Statement::Expression(Some(Expression::Assignment(
+                "a".to_string(),
+                Box::new(Expression::Ternary(
+                    Box::new(Expression::Const(1)),
+                    Box::new(Expression::Const(1)),
+                    Box::new(Expression::Const(0))
+                ))
+            )))])
         );
     }
 

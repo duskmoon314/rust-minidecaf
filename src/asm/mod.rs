@@ -11,13 +11,13 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
     writeln!(w, "{}:", ir_function.name)?;
 
     writeln!(w, "{}_prologue:", ir_function.name)?;
-    let frame_size: u32 = ir_function.scope.symbol_map.len() as u32 * 4 + 8;
+    let frame_size: u32 = ir_function.var_max * 4 + 8;
     writeln!(w, "    addi  sp, sp, -{}", frame_size)?;
     writeln!(w, "    sw    ra, {}(sp)", frame_size - 4)?;
     writeln!(w, "    sw    fp, {}(sp)", frame_size - 8)?;
     writeln!(w, "    addi  fp, sp, {}", frame_size)?;
 
-    for s in &ir_function.scope.statements {
+    for s in &ir_function.statements {
         writeln!(w, "# {:?}", s)?;
         match s {
             IRStatement::Comment(_) => {
@@ -110,22 +110,11 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    snez  t1, t1")?;
                 writeln!(w, "    sw    t1, 0(sp)")?;
             }
-            IRStatement::FrameAddr(iter, idx) => {
-                let mut i = *iter;
-                writeln!(w, "    mv    t1, fp")?;
-                loop {
-                    if i == 0 {
-                        break;
-                    } else {
-                        // load old fp
-                        writeln!(w, "    lw    t1, -4(t1)")?;
-                        i = i - 1;
-                    }
-                }
+            IRStatement::FrameAddr(idx) => {
                 writeln!(w, "    li    t2, {}", *idx)?;
                 writeln!(w, "    slli  t2, t2, 2")?;
                 writeln!(w, "    addi  t2, t2, 12")?;
-                writeln!(w, "    sub   t1, t1, t2")?;
+                writeln!(w, "    sub   t1, fp, t2")?;
                 writeln!(w, "    addi  sp, sp, -4")?;
                 writeln!(w, "    sw    t1, 0(sp)")?;
             }
