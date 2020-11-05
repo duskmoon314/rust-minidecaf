@@ -7,11 +7,17 @@ use std::slice::Iter;
  * Function     -> Type Identifier Lparen Rparen Compound_Statement
  * Type         -> Type(Int | Double)
  * BlockItem    -> Statement | Declaration
- * Compound_Statement -> Lbrace Statement* Rbrace
+ * Compound_Statement -> Lbrace BlockItem* Rbrace
  * Statement    ->  | Return Expression Semicolon
  *                  | Expression? Semicolon
  *                  | If ( Expression ) Statement (Else statement)?
  *                  | Compound_Statement
+ *                  | For ( Expression? Semicolon Expression? Semicolon Expression? Semicolon ) Statement
+ *                  | For ( Declaration Expression? Semicolon Expression? Semicolon ) Statement
+ *                  | While ( Expression ) Statement
+ *                  | Do Statement While ( Expression ) Semicolon
+ *                  | Break Semicolon
+ *                  | Continue Semicolon
  * Declaration  -> Type Identifier (= Expression)? Semicolon
  * Expression   ->  | Assignment
  * Factor       ->  | Integer(i32)
@@ -40,23 +46,32 @@ pub struct Function {
     pub statements: Vec<Statement>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Statement {
     Return(Expression),
     Declaration(Declaration),
     Expression(Option<Expression>),
     Condition(Expression, Box<Statement>, Option<Box<Statement>>), // 由 parse 函数确保不会有 Declaration 作为子句
     Compound(Vec<Statement>),
+    Break,
+    Continue,
+    Loop(
+        Option<Box<Statement>>,
+        Option<Expression>,
+        Box<Statement>,
+        Option<Expression>,
+    ),
+    // Loop(pre, cond, body, post)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Declaration {
     pub t: Type,
     pub name: String,
     pub expression: Option<Expression>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     Const(i32),
     Unary(Operator, Box<Expression>),
@@ -88,7 +103,7 @@ pub fn parse_factor(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
             }
             Token::Integer(num) => return Expression::Const(*num), // <int>
             Token::Identifier(name) => return Expression::Variable(name.to_owned()),
-            _ => panic!("Expected factor, Nothing found"),
+            _ => panic!("Expected factor, Nothing found. Token:{:?}", next),
         },
         _ => panic!("Nothing Left"),
     }
@@ -229,6 +244,23 @@ pub fn parse_expression(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     parse_assignment(tokens)
 }
 
+// Expression ; | <Empty> ; | <Empty> )
+// Use in for-loop: for(;;){}
+pub fn parse_expression_option(tokens: &mut PeekableNth<Iter<Token>>) -> Option<Expression> {
+    match tokens.peek() {
+        Some(Token::Symbol(Symbol::Semicolon)) | Some(Token::Symbol(Symbol::Rparen)) => None,
+        _ => {
+            let expr = parse_expression(tokens);
+            match tokens.peek() {
+                Some(Token::Symbol(Symbol::Semicolon)) | Some(Token::Symbol(Symbol::Rparen)) => {
+                    Some(expr)
+                }
+                _ => panic!("Expression Option Error: Expecting ; ) after Option<Expression>"),
+            }
+        }
+    }
+}
+
 pub fn parse_declaration(tokens: &mut PeekableNth<Iter<Token>>) -> Declaration {
     match tokens.next() {
         Some(Token::Type(t)) => match tokens.next() {
@@ -270,6 +302,7 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
             return Statement::Compound(stmts);
         }
         Some(Token::Keyword(Keyword::Return)) => {
+            // return expr;
             tokens.next();
             let expr = parse_expression(tokens);
             match tokens.next() {
@@ -280,6 +313,7 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
             }
         }
         Some(Token::Keyword(Keyword::If)) => {
+            // if () stmt (else stmt)?
             tokens.next(); // consume if
             match tokens.next() {
                 Some(Token::Symbol(Symbol::Lparen)) => {}
@@ -300,17 +334,113 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
                 _ => Statement::Condition(cond, Box::new(t_stmt), None),
             }
         }
+        Some(Token::Keyword(Keyword::For)) => {
+            // for(pre; cond; post) body
+            tokens.next(); // consume for
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Lparen)) => {}
+                _ => panic!("For Error: Expecting ("),
+            }
+            let pre: Statement;
+            match tokens.peek() {
+                Some(Token::Type(_)) => pre = Statement::Declaration(parse_declaration(tokens)),
+                _ => {
+                    let expr = parse_expression_option(tokens);
+                    tokens.next();
+                    pre = Statement::Expression(expr);
+                }
+            };
+            match pre {
+                Statement::Expression(_) | Statement::Declaration(_) => {}
+                _ => panic!("For Error: Expecting expression/declaration as pre"),
+            }
+            let cond = parse_expression_option(tokens);
+            if tokens.next() != Some(&Token::Symbol(Symbol::Semicolon)) {
+                panic!("For Error: Expecting ; after cond");
+            }
+            let post = parse_expression_option(tokens);
+            if tokens.next() != Some(&Token::Symbol(Symbol::Rparen)) {
+                panic!("For Error: Expecting ) after post, Found {:?}");
+            }
+
+            return Statement::Loop(
+                Some(Box::new(pre)),
+                cond,
+                Box::new(parse_statement(tokens)),
+                post,
+            );
+        }
+        Some(Token::Keyword(Keyword::While)) => {
+            // while(cond) body
+            tokens.next(); // consume while
+            if tokens.next() != Some(&Token::Symbol(Symbol::Lparen)) {
+                panic!("While Error: Expecting (")
+            }
+            let cond = parse_expression(tokens);
+            if tokens.next() != Some(&Token::Symbol(Symbol::Rparen)) {
+                panic!("While Error: Expecting )")
+            }
+
+            return Statement::Loop(None, Some(cond), Box::new(parse_statement(tokens)), None);
+        }
+        Some(Token::Keyword(Keyword::Do)) => {
+            // do body while(cond)
+            tokens.next(); // consume do
+            let body = parse_statement(tokens);
+            if tokens.next() != Some(&Token::Keyword(Keyword::While)) {
+                panic!("DoWhile Error: Expecting while after do")
+            }
+            if tokens.next() != Some(&Token::Symbol(Symbol::Lparen)) {
+                panic!("DoWhile Error: Expecting (")
+            }
+            let cond = parse_expression(tokens);
+            if tokens.next() != Some(&Token::Symbol(Symbol::Rparen)) {
+                panic!("DoWhile Error: Expecting )")
+            }
+            if tokens.next() != Some(&Token::Symbol(Symbol::Semicolon)) {
+                panic!("DoWhile Error: Expecting ;")
+            }
+
+            return Statement::Loop(
+                Some(Box::new(body.clone())),
+                Some(cond),
+                Box::new(body),
+                None,
+            );
+        }
+        Some(Token::Keyword(Keyword::Break)) => {
+            tokens.next(); // consume break
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Semicolon)) => {
+                    return Statement::Break;
+                }
+                _ => panic!("Statement Err: Expecting ; at the end"),
+            }
+        }
+        Some(Token::Keyword(Keyword::Continue)) => {
+            tokens.next(); // consume continue
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Semicolon)) => {
+                    return Statement::Continue;
+                }
+                _ => panic!("Statement Err: Expecting ; at the end"),
+            }
+        }
         Some(Token::Symbol(Symbol::Semicolon)) => {
-            tokens.next();
-            return Statement::Expression(None);
+            tokens.next(); // consume ;
+            Statement::Expression(None)
         }
         _ => {
+            // expr ;
             let expr = parse_expression(tokens);
             match tokens.next() {
                 Some(Token::Symbol(Symbol::Semicolon)) => {
                     return Statement::Expression(Some(expr));
                 }
-                _ => panic!("Statement Err: Expecting ; at the end"),
+                _ => panic!(
+                    "Statement Err: Expecting ; at the end. tokens: {:?}",
+                    tokens
+                ),
             }
         }
     }

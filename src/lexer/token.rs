@@ -109,9 +109,13 @@ impl Operator {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Keyword {
     Return,
-    For,
     If,
     Else,
+    For,
+    While,
+    Do,
+    Break,
+    Continue,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]

@@ -71,7 +71,7 @@ pub enum IRStatement {
 #[derive(Debug, PartialEq)]
 pub struct IRProgram {
     pub function: IRFunction,
-    // pub label_cnt: u32,
+    pub label_cnt: u32,
 }
 
 fn new_label(label_cnt: &mut u32) -> u32 {
@@ -140,11 +140,18 @@ pub struct IRFunction {
     pub var_max: u32,
 }
 
+struct FunctionStaticProps<'a> {
+    name: &'a str,
+    loop_label: Vec<(u32, u32)>,
+    var_max: u32,
+}
+
 pub fn ir(program: &Program) -> IRProgram {
     let mut label_cnt: u32 = 0;
     let mut scope_stack: Vec<Scope> = Vec::new();
     IRProgram {
         function: ir_func(&program.function, &mut label_cnt, &mut scope_stack),
+        label_cnt: label_cnt,
     }
 }
 
@@ -158,27 +165,31 @@ pub fn ir_func(
         parent_var_cnt: 0,
     });
     let mut statements: Vec<IRStatement> = Vec::new();
-    let mut var_max: u32 = 0;
+    let mut props = FunctionStaticProps {
+        name: &function.name,
+        loop_label: Vec::new(),
+        var_max: 0,
+    };
     for s in &function.statements {
-        ir_stmt(&s, label_cnt, scope_stack, &mut var_max, &mut statements);
+        ir_stmt(&s, label_cnt, scope_stack, &mut props, &mut statements);
     }
     let s = scope_stack.last_mut().unwrap();
-    var_max = max(var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
+    props.var_max = max(props.var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
     scope_stack.pop();
 
     return IRFunction {
         name: function.name.to_owned(),
         statements: statements,
-        var_max: var_max,
+        var_max: props.var_max,
     };
 }
 
 #[allow(unreachable_patterns)]
-pub fn ir_stmt(
+fn ir_stmt(
     statement: &Statement,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
-    var_max: &mut u32,
+    props: &mut FunctionStaticProps,
     ir_statements: &mut Vec<IRStatement>,
 ) {
     match statement {
@@ -193,46 +204,134 @@ pub fn ir_stmt(
                 // additive multiplicative logical => stack + 1
                 // don't pop in assign, so expr => stack + 1
                 // Add pop here to restore
-                ir_statements.push(IRStatement::Pop)
+                ir_statements.push(IRStatement::Pop);
             }
             None => {}
         },
         Statement::Condition(cond, t_stmt, f_stmt) => {
-            let lable_id = new_label(label_cnt);
-            ir_statements.push(IRStatement::Comment(format!("If-Else Label: {}", lable_id)));
+            let end_label = new_label(label_cnt);
+            ir_statements.push(IRStatement::Comment(String::from("If-Else")));
             ir_expr(cond, label_cnt, scope_stack, ir_statements);
             match f_stmt {
                 None => {
-                    ir_statements.push(IRStatement::Beqz(format!("IfElse_End_{}", lable_id)));
-                    ir_stmt(t_stmt, label_cnt, scope_stack, var_max, ir_statements);
-                    ir_statements.push(IRStatement::Label(format!("IfElse_End_{}", lable_id)));
+                    ir_statements.push(IRStatement::Beqz(format!(
+                        ".L.{}.IfElse_End.{}",
+                        props.name, end_label
+                    )));
+                    ir_stmt(t_stmt, label_cnt, scope_stack, props, ir_statements);
+                    ir_statements.push(IRStatement::Label(format!(
+                        ".L.{}.IfElse_End.{}",
+                        props.name, end_label
+                    )));
                 }
                 Some(s) => {
-                    ir_statements.push(IRStatement::Beqz(format!("Else_{}", lable_id)));
-                    ir_stmt(t_stmt, label_cnt, scope_stack, var_max, ir_statements);
+                    let else_label = new_label(label_cnt);
+                    ir_statements.push(IRStatement::Beqz(format!(
+                        ".L.{}.IfElse_Else.{}",
+                        props.name, else_label
+                    )));
+                    ir_stmt(t_stmt, label_cnt, scope_stack, props, ir_statements);
 
-                    ir_statements.push(IRStatement::Br(format!("IfElse_End_{}", lable_id)));
-                    ir_statements.push(IRStatement::Label(format!("Else_{}", lable_id)));
+                    ir_statements.push(IRStatement::Br(format!(
+                        ".L.{}.IfElse_End.{}",
+                        props.name, end_label
+                    )));
+                    ir_statements.push(IRStatement::Label(format!(
+                        ".L.{}.IfElse_Else.{}",
+                        props.name, else_label
+                    )));
 
-                    ir_stmt(s, label_cnt, scope_stack, var_max, ir_statements);
-                    ir_statements.push(IRStatement::Label(format!("IfElse_End_{}", lable_id)))
+                    ir_stmt(s, label_cnt, scope_stack, props, ir_statements);
+                    ir_statements.push(IRStatement::Label(format!(
+                        ".L.{}.IfElse_End.{}",
+                        props.name, end_label
+                    )))
                 }
             }
         }
         Statement::Compound(stmts) => {
             new_scope(scope_stack);
             for s in stmts {
-                ir_stmt(s, label_cnt, scope_stack, var_max, ir_statements);
+                ir_stmt(s, label_cnt, scope_stack, props, ir_statements);
             }
             let s = scope_stack.last_mut().unwrap();
-            *var_max = max(*var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
+            props.var_max = max(props.var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
             scope_stack.pop();
         }
+        Statement::Loop(pre, cond, body, post) => {
+            /*
+             *  {
+             *      pre     (for do_while: body)
+             *      cond_label
+             *      cond
+             *      body
+             *      continue_label
+             *      post
+             *  }
+             *  break_label
+             */
+            if **body == Statement::Expression(None) {
+                return;
+            }
+            let cond_label = new_label(label_cnt);
+            let (break_label, continue_label) = (new_label(label_cnt), new_label(label_cnt));
+            props.loop_label.push((break_label, continue_label));
+            new_scope(scope_stack);
+            if let Some(pre) = pre {
+                ir_stmt(pre, label_cnt, scope_stack, props, ir_statements)
+            }
+            ir_statements.push(IRStatement::Label(format!(
+                ".L.{}.Loop_Cond.{}",
+                props.name, cond_label
+            )));
+            if let Some(cond) = cond {
+                ir_expr(cond, label_cnt, scope_stack, ir_statements);
+                ir_statements.push(IRStatement::Beqz(format!(
+                    ".L.{}.Loop_Break.{}",
+                    props.name, break_label
+                )))
+            }
+            ir_stmt(body, label_cnt, scope_stack, props, ir_statements);
+            ir_statements.push(IRStatement::Label(format!(
+                ".L.{}.Loop_Continue.{}",
+                props.name, continue_label
+            )));
+            if let Some(post) = post {
+                ir_expr(post, label_cnt, scope_stack, ir_statements);
+                ir_statements.push(IRStatement::Pop);
+            }
+            ir_statements.push(IRStatement::Br(format!(
+                ".L.{}.Loop_Cond.{}",
+                props.name, cond_label
+            )));
+            let s = scope_stack.last_mut().unwrap();
+            props.var_max = max(props.var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
+            scope_stack.pop();
+            ir_statements.push(IRStatement::Label(format!(
+                ".L.{}.Loop_Break.{}",
+                props.name, break_label
+            )));
+            props.loop_label.pop();
+        }
+        Statement::Break => ir_statements.push(IRStatement::Br(format!(
+            ".L.{}.Loop_Break.{}",
+            props.name,
+            props.loop_label.last().expect("Error: break out of loop").0
+        ))),
+        Statement::Continue => ir_statements.push(IRStatement::Br(format!(
+            ".L.{}.Loop_Continue.{}",
+            props.name,
+            props
+                .loop_label
+                .last()
+                .expect("Error: continue out of loop")
+                .1
+        ))),
         _ => unimplemented!(),
     }
 }
 
-pub fn ir_decl(
+fn ir_decl(
     declaration: &Declaration,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
@@ -252,7 +351,7 @@ pub fn ir_decl(
 }
 
 #[allow(unreachable_patterns)]
-pub fn ir_expr(
+fn ir_expr(
     expr: &Expression,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,

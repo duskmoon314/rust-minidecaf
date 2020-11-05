@@ -7,7 +7,12 @@ named!(
     alt!(
         tag!("return")  => { |_| Token::Keyword(Keyword::Return)}   |
         tag!("if")      => { |_| Token::Keyword(Keyword::If)}       |
-        tag!("else")    => { |_| Token::Keyword(Keyword::Else)}
+        tag!("else")    => { |_| Token::Keyword(Keyword::Else)}     |
+        tag!("for")     => { |_| Token::Keyword(Keyword::For)}      |
+        tag!("while")   => { |_| Token::Keyword(Keyword::While)}    |
+        tag!("do")      => { |_| Token::Keyword(Keyword::Do)}       |
+        tag!("break")   => { |_| Token::Keyword(Keyword::Break)}    |
+        tag!("continue")=> { |_| Token::Keyword(Keyword::Continue)}
     )
 );
 
