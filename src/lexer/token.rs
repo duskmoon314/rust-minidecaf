@@ -75,34 +75,25 @@ pub enum Operator {
 
 impl Operator {
     pub fn is_unary(&self) -> bool {
-        match self {
-            Operator::Minus | Operator::Not | Operator::BitwiseNot => true,
-            _ => false,
-        }
+        matches!(self, Operator::Minus | Operator::Not | Operator::BitwiseNot)
     }
     pub fn is_multiplicative(&self) -> bool {
-        match self {
-            Operator::Asterisk | Operator::Slash | Operator::Percent => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Operator::Asterisk | Operator::Slash | Operator::Percent
+        )
     }
     pub fn is_additive(&self) -> bool {
-        match self {
-            Operator::Plus | Operator::Minus => true,
-            _ => false,
-        }
+        matches!(self, Operator::Plus | Operator::Minus)
     }
     pub fn is_relational(&self) -> bool {
-        match self {
-            Operator::LT | Operator::LE | Operator::GT | Operator::GE => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            Operator::LT | Operator::LE | Operator::GT | Operator::GE
+        )
     }
     pub fn is_equality(&self) -> bool {
-        match self {
-            Operator::EQ | Operator::NEQ => true,
-            _ => false,
-        }
+        matches!(self, Operator::EQ | Operator::NEQ)
     }
 }
 

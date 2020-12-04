@@ -11,7 +11,7 @@ use nom::IResult;
 
 pub fn lex_all(input: &str) -> IResult<&str, token::Token> {
     let (input, _) = multispace0(input)?;
-    if input.len() == 0 {
+    if input.is_empty() {
         Ok(("", token::Token::Symbol(token::Symbol::EOF)))
     } else {
         let (reset, tk) = alt((
@@ -29,7 +29,7 @@ pub fn lex_all(input: &str) -> IResult<&str, token::Token> {
 pub fn lexer(input: &str) -> Vec<token::Token> {
     let mut tokens = Vec::<token::Token>::new();
     let mut reset = input;
-    while reset.len() > 0 {
+    while !reset.is_empty() {
         let res = lex_all(reset);
         let result = match res {
             Ok(result) => result,
@@ -38,7 +38,7 @@ pub fn lexer(input: &str) -> Vec<token::Token> {
         tokens.push(result.1);
         reset = result.0;
     }
-    return tokens;
+    tokens
 }
 
 #[cfg(test)]

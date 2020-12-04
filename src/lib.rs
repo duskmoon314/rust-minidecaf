@@ -66,6 +66,6 @@ pub fn run(_input: &str, _output: &mut impl std::io::Write, log: LogOpts) -> std
         let mut file = OpenOptions::new().append(true).open(&path)?;
         writeln!(file, "\nIR output:\n{:?}", ir_code)?;
     }
-    let _asm_code = asm::write_asm(&ir_code, _output);
+    let _asm_code = asm::asm_program(&ir_code, _output);
     Ok(())
 }

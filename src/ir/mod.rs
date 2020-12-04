@@ -35,6 +35,7 @@ type Label = String;
  * bnez(str)    : pop, if not zero, jump to str, stack_pointer - 1
  * br(str)      : jump to str
  * comment(str) : write "# {str}" to asm file
+ * call(str, u32)    : call function name <str>, parameter_cnt: u32
  */
 
 #[derive(Debug, PartialEq)]
@@ -65,23 +66,35 @@ pub enum IRStatement {
     Beqz(Label),
     Bnez(Label),
     Comment(String),
+    Call(String, u32),
     Return,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct IRProgram {
-    pub function: IRFunction,
+    pub functions: Vec<IRFunction>,
     pub label_cnt: u32,
 }
 
 fn new_label(label_cnt: &mut u32) -> u32 {
     let cnt = *label_cnt;
     *label_cnt += 1;
-    return cnt;
+    cnt
 }
 
 // SymbolMap (id_name, index)
 type SymbolMap = HashMap<String, u32>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionProps {
+    parameters: Vec<Type>,
+    return_type: Type,
+    is_defined: bool,
+    idx: u32,
+}
+
+// FunctionMap (func_name, FunctionProps)
+type FunctionMap = HashMap<String, FunctionProps>;
 
 // 作用域
 #[derive(Debug, Clone)]
@@ -93,9 +106,9 @@ pub struct Scope {
 impl Scope {
     pub fn lookup(&self, id: &str) -> Option<u32> {
         if let Some(i) = self.symbol_map.get(id) {
-            return Some(i + self.parent_var_cnt);
+            Some(i + self.parent_var_cnt)
         } else {
-            return None;
+            None
         }
     }
     pub fn insert(&mut self, id: &str) -> u32 {
@@ -103,7 +116,7 @@ impl Scope {
         if self.symbol_map.insert(id.to_owned(), idx).is_some() {
             panic!("Declaration Error: Redefine Var {}", id);
         }
-        return idx + self.parent_var_cnt;
+        idx + self.parent_var_cnt
     }
 }
 
@@ -112,17 +125,14 @@ fn new_scope(scope_stack: &mut Vec<Scope>) {
     let parent_var_cnt = c.parent_var_cnt + c.symbol_map.len() as u32;
     scope_stack.push(Scope {
         symbol_map: SymbolMap::new(),
-        parent_var_cnt: parent_var_cnt,
+        parent_var_cnt,
     })
 }
 
-fn lookup(scope_stack: &Vec<Scope>, id: &str) -> u32 {
+fn lookup(scope_stack: &[Scope], id: &str) -> u32 {
     for s in scope_stack.iter().rev() {
-        match s.lookup(id) {
-            Some(i) => {
-                return i;
-            }
-            _ => {}
+        if let Some(i) = s.lookup(id) {
+            return i;
         }
     }
     panic!("Var {} Not Found", id);
@@ -133,25 +143,86 @@ fn insert(scope_stack: &mut Vec<Scope>, id: &str) -> u32 {
     s.insert(id)
 }
 
+fn new_fun(map: &mut FunctionMap, function_cnt: &mut u32, fun: &Function) -> u32 {
+    let props = FunctionProps {
+        parameters: fun
+            .parameters
+            .iter()
+            .map(|decl: &Declaration| -> Type { decl.t })
+            .collect(),
+        return_type: fun.t,
+        is_defined: !fun.statements.is_empty(),
+        idx: *function_cnt,
+    };
+
+    // 已声明
+    if let Some(f) = map.get_mut(&fun.name) {
+        // 未定义，语句不为空
+        if !f.is_defined && !fun.statements.is_empty() {
+            if props.parameters != f.parameters {
+                panic!("Function Implementation Error: Different parameters types between Declaration and Implementation\nFunction : {:?}\nDeclaration : {:?}\nImplementation : {:?}", fun.name, f.parameters, props.parameters);
+            }
+            f.is_defined = true;
+        } else {
+            // 未定义，语句为空 => 重复声明
+            // 已定义 => 多次定义或定义后声明
+            panic!("Function Declaration Error: Declare or Implementation more than one times or declare after Implementation\n Function : {:?}", fun.name)
+        }
+        f.idx
+    } else {
+        // 未声明或定义
+        map.insert(fun.name.to_owned(), props);
+        *function_cnt += 1;
+        // 返回增加函数后的函数数量，应比 Vec<IRFunction>.len() 大1
+        *function_cnt
+    }
+}
+
+fn check_fun_defined(map: &FunctionMap) {
+    for (key, val) in map.iter() {
+        if !val.is_defined {
+            panic!(
+                "Function Implementation Error: Function {} not defined",
+                key
+            );
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct IRFunction {
     pub name: String,
     pub statements: Vec<IRStatement>,
+    pub param_cnt: u32,
     pub var_max: u32,
 }
 
 struct FunctionStaticProps<'a> {
     name: &'a str,
+    function_map: &'a FunctionMap,
     loop_label: Vec<(u32, u32)>,
     var_max: u32,
 }
 
 pub fn ir(program: &Program) -> IRProgram {
     let mut label_cnt: u32 = 0;
+    let mut function_cnt: u32 = 0;
     let mut scope_stack: Vec<Scope> = Vec::new();
+    let mut functions: Vec<IRFunction> = Vec::new();
+    let mut function_map = FunctionMap::new();
+    for f in &program.functions {
+        let idx = new_fun(&mut function_map, &mut function_cnt, f);
+        let func = ir_func(f, &mut label_cnt, &mut scope_stack, &function_map);
+        if idx == functions.len() as u32 + 1 {
+            functions.push(func);
+        } else {
+            functions[idx as usize] = func;
+        }
+    }
+    check_fun_defined(&function_map);
     IRProgram {
-        function: ir_func(&program.function, &mut label_cnt, &mut scope_stack),
-        label_cnt: label_cnt,
+        functions,
+        label_cnt,
     }
 }
 
@@ -159,6 +230,7 @@ pub fn ir_func(
     function: &Function,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
+    function_map: &FunctionMap,
 ) -> IRFunction {
     scope_stack.push(Scope {
         symbol_map: SymbolMap::new(),
@@ -167,21 +239,28 @@ pub fn ir_func(
     let mut statements: Vec<IRStatement> = Vec::new();
     let mut props = FunctionStaticProps {
         name: &function.name,
+        function_map,
         loop_label: Vec::new(),
         var_max: 0,
     };
+    for p in &function.parameters {
+        // 只需插入，不需赋值
+        insert(scope_stack, &p.name);
+    }
+
     for s in &function.statements {
-        ir_stmt(&s, label_cnt, scope_stack, &mut props, &mut statements);
+        ir_stmt(s, label_cnt, scope_stack, &mut props, &mut statements);
     }
     let s = scope_stack.last_mut().unwrap();
     props.var_max = max(props.var_max, s.parent_var_cnt + s.symbol_map.len() as u32);
     scope_stack.pop();
 
-    return IRFunction {
+    IRFunction {
         name: function.name.to_owned(),
-        statements: statements,
+        statements,
+        param_cnt: function.parameters.len() as u32,
         var_max: props.var_max,
-    };
+    }
 }
 
 #[allow(unreachable_patterns)]
@@ -194,13 +273,13 @@ fn ir_stmt(
 ) {
     match statement {
         Statement::Return(expr) => {
-            ir_expr(expr, label_cnt, scope_stack, ir_statements);
+            ir_expr(expr, label_cnt, scope_stack, props, ir_statements);
             ir_statements.push(IRStatement::Return);
         }
-        Statement::Declaration(decl) => ir_decl(decl, label_cnt, scope_stack, ir_statements),
+        Statement::Declaration(decl) => ir_decl(decl, label_cnt, scope_stack, props, ir_statements),
         Statement::Expression(expr) => match expr {
             Some(e) => {
-                ir_expr(e, label_cnt, scope_stack, ir_statements);
+                ir_expr(e, label_cnt, scope_stack, props, ir_statements);
                 // additive multiplicative logical => stack + 1
                 // don't pop in assign, so expr => stack + 1
                 // Add pop here to restore
@@ -211,7 +290,7 @@ fn ir_stmt(
         Statement::Condition(cond, t_stmt, f_stmt) => {
             let end_label = new_label(label_cnt);
             ir_statements.push(IRStatement::Comment(String::from("If-Else")));
-            ir_expr(cond, label_cnt, scope_stack, ir_statements);
+            ir_expr(cond, label_cnt, scope_stack, props, ir_statements);
             match f_stmt {
                 None => {
                     ir_statements.push(IRStatement::Beqz(format!(
@@ -285,7 +364,7 @@ fn ir_stmt(
                 props.name, cond_label
             )));
             if let Some(cond) = cond {
-                ir_expr(cond, label_cnt, scope_stack, ir_statements);
+                ir_expr(cond, label_cnt, scope_stack, props, ir_statements);
                 ir_statements.push(IRStatement::Beqz(format!(
                     ".L.{}.Loop_Break.{}",
                     props.name, break_label
@@ -297,7 +376,7 @@ fn ir_stmt(
                 props.name, continue_label
             )));
             if let Some(post) = post {
-                ir_expr(post, label_cnt, scope_stack, ir_statements);
+                ir_expr(post, label_cnt, scope_stack, props, ir_statements);
                 ir_statements.push(IRStatement::Pop);
             }
             ir_statements.push(IRStatement::Br(format!(
@@ -335,6 +414,7 @@ fn ir_decl(
     declaration: &Declaration,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
+    props: &FunctionStaticProps,
     ir_statements: &mut Vec<IRStatement>,
 ) {
     let idx = insert(scope_stack, &declaration.name);
@@ -342,7 +422,7 @@ fn ir_decl(
     // 后者默认给 0
     // 执行一次赋值操作
     match &declaration.expression {
-        Some(expr) => ir_expr(&expr, label_cnt, scope_stack, ir_statements),
+        Some(expr) => ir_expr(&expr, label_cnt, scope_stack, props, ir_statements),
         None => ir_statements.push(IRStatement::Push(0)),
     }
     ir_statements.push(IRStatement::FrameAddr(idx));
@@ -355,12 +435,13 @@ fn ir_expr(
     expr: &Expression,
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
+    props: &FunctionStaticProps,
     ir_statements: &mut Vec<IRStatement>,
 ) {
     match expr {
         Expression::Const(int32) => ir_statements.push(IRStatement::Push(*int32)),
         Expression::Unary(unary_op, left) => {
-            ir_expr(left, label_cnt, scope_stack, ir_statements);
+            ir_expr(left, label_cnt, scope_stack, props, ir_statements);
             match *unary_op {
                 Operator::Minus => ir_statements.push(IRStatement::Neg),
                 Operator::Not => ir_statements.push(IRStatement::LogicalNot),
@@ -369,8 +450,8 @@ fn ir_expr(
             };
         }
         Expression::Binary(op, left, right) => {
-            ir_expr(left, label_cnt, scope_stack, ir_statements);
-            ir_expr(right, label_cnt, scope_stack, ir_statements);
+            ir_expr(left, label_cnt, scope_stack, props, ir_statements);
+            ir_expr(right, label_cnt, scope_stack, props, ir_statements);
             match *op {
                 Operator::Asterisk => ir_statements.push(IRStatement::Mul),
                 Operator::Slash => ir_statements.push(IRStatement::Div),
@@ -394,7 +475,7 @@ fn ir_expr(
             ir_statements.push(IRStatement::Load);
         }
         Expression::Assignment(id, expr) => {
-            ir_expr(expr, label_cnt, scope_stack, ir_statements);
+            ir_expr(expr, label_cnt, scope_stack, props, ir_statements);
             let idx = lookup(scope_stack, id);
             ir_statements.push(IRStatement::FrameAddr(idx));
             ir_statements.push(IRStatement::Store);
@@ -402,13 +483,29 @@ fn ir_expr(
         Expression::Ternary(cond, t_expr, f_expr) => {
             let lable_id = new_label(label_cnt);
             ir_statements.push(IRStatement::Comment(format!("Ternary Label: {}", lable_id)));
-            ir_expr(cond, label_cnt, scope_stack, ir_statements);
+            ir_expr(cond, label_cnt, scope_stack, props, ir_statements);
             ir_statements.push(IRStatement::Beqz(format!("Ternary_False_{}", lable_id)));
-            ir_expr(t_expr, label_cnt, scope_stack, ir_statements);
+            ir_expr(t_expr, label_cnt, scope_stack, props, ir_statements);
             ir_statements.push(IRStatement::Br(format!("Ternary_End_{}", lable_id)));
             ir_statements.push(IRStatement::Label(format!("Ternary_False_{}", lable_id)));
-            ir_expr(f_expr, label_cnt, scope_stack, ir_statements);
+            ir_expr(f_expr, label_cnt, scope_stack, props, ir_statements);
             ir_statements.push(IRStatement::Label(format!("Ternary_End_{}", lable_id)));
+        }
+        Expression::Function(name, params) => {
+            let f = props
+                .function_map
+                .get(name)
+                .expect("Call Function Error: Call before Declaration");
+            if params.len() != f.parameters.len() {
+                panic!("Call Function Error: Wrong parameters");
+            }
+            for param in params.iter().rev() {
+                ir_expr(param, label_cnt, scope_stack, props, ir_statements);
+            }
+            ir_statements.push(IRStatement::Call(
+                name.to_owned(),
+                f.parameters.len() as u32,
+            ));
         }
         _ => (),
     }

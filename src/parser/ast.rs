@@ -3,8 +3,10 @@ use peek_nth::PeekableNth;
 use std::slice::Iter;
 
 /*
- * Program      -> Function
- * Function     -> Type Identifier Lparen Rparen Compound_Statement
+ * Program      -> Function*
+ * Function     -> Type Identifier Lparen Parameter_List Rparen (Compound_Statement | ;)
+ * Parameter_List -> (Type Identifier (, Type Identifier)*)?
+ * Expression_List -> (Expression (, Expression)*)?
  * Type         -> Type(Int | Double)
  * BlockItem    -> Statement | Declaration
  * Compound_Statement -> Lbrace BlockItem* Rbrace
@@ -24,6 +26,7 @@ use std::slice::Iter;
  *                  | ~ ! - Factor
  *                  | ( Expression )
  *                  | Identifier
+ *                  | Identifier ( Expression )
  * Multiplicative -> Factor | Multiplicative * / % Factor
  * Additive     -> Multiplicative | Additive + - Multiplicative
  * Relational   -> Additive | Relational < > <= >= Additive
@@ -36,13 +39,14 @@ use std::slice::Iter;
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
-    pub function: Function,
+    pub functions: Vec<Function>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub t: Type,
     pub name: String,
+    pub parameters: Vec<Declaration>,
     pub statements: Vec<Statement>,
 }
 
@@ -83,9 +87,52 @@ pub enum Expression {
     Ternary(Box<Expression>, Box<Expression>, Box<Expression>), // condition ? expression : ternary
     Assignment(String, Box<Expression>),                        // var = ()
     Variable(String),                                           // var
+    Function(String, Vec<Expression>),
 }
 
-// Factor => (<expression>) | Unary | Const(i32)
+fn parse_parameter(tokens: &mut PeekableNth<Iter<Token>>) -> Vec<Declaration> {
+    let mut list: Vec<Declaration> = Vec::new();
+
+    if tokens.peek() == Some(&&Token::Symbol(Symbol::Rparen)) {
+        return list;
+    }
+
+    match tokens.next() {
+        Some(Token::Type(t)) => match tokens.next() {
+            Some(Token::Identifier(name)) => list.push(Declaration {
+                t: *t,
+                name: name.to_string(),
+                expression: None,
+            }),
+            _ => panic!("Parameter Error: Expecting identifier"),
+        },
+        _ => panic!("Parameter Error: Expecting type"),
+    }
+
+    loop {
+        if tokens.peek() == Some(&&Token::Symbol(Symbol::Rparen)) {
+            break;
+        } else {
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Comma)) => match tokens.next() {
+                    Some(Token::Type(t)) => match tokens.next() {
+                        Some(Token::Identifier(name)) => list.push(Declaration {
+                            t: *t,
+                            name: name.to_string(),
+                            expression: None,
+                        }),
+                        _ => panic!("Parameter Error: Expecting identifier"),
+                    },
+                    _ => panic!("Parameter Error: Expecting type"),
+                },
+                _ => panic!("Parameter Error: Expecting , between two parameters"),
+            }
+        }
+    }
+    list
+}
+
+// Factor => (<expression>) | Unary | Const(i32) | Fun(name, expr_list) | Var
 pub fn parse_factor(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     match tokens.next() {
         Some(next) => match next {
@@ -93,16 +140,29 @@ pub fn parse_factor(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
                 // ( <expression> )
                 let expr = parse_expression(tokens);
                 match tokens.next() {
-                    Some(Token::Symbol(Symbol::Rparen)) => return expr,
+                    Some(Token::Symbol(Symbol::Rparen)) => expr,
                     _ => panic!("Missing ) to close expression"),
                 }
             }
             Token::Operator(unary_op) if unary_op.is_unary() => {
                 let expr = parse_factor(tokens);
-                return Expression::Unary(*unary_op, Box::new(expr));
+                Expression::Unary(*unary_op, Box::new(expr))
             }
-            Token::Integer(num) => return Expression::Const(*num), // <int>
-            Token::Identifier(name) => return Expression::Variable(name.to_owned()),
+            Token::Integer(num) => Expression::Const(*num), // <int>
+            Token::Identifier(name) => {
+                match tokens.peek() {
+                    Some(Token::Symbol(Symbol::Lparen)) => {
+                        tokens.next(); // consume (
+                        let expr_list = parse_expression_list(tokens);
+                        if tokens.next() == Some(&Token::Symbol(Symbol::Rparen)) {
+                            Expression::Function(name.to_owned(), expr_list)
+                        } else {
+                            panic!("Expecting ) to close fun(expr)")
+                        }
+                    }
+                    _ => Expression::Variable(name.to_owned()),
+                }
+            }
             _ => panic!("Expected factor, Nothing found. Token:{:?}", next),
         },
         _ => panic!("Nothing Left"),
@@ -176,15 +236,10 @@ pub fn parse_equality(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
 // Logical_And => Equality && Equality
 pub fn parse_logical_and(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     let mut l_factor = parse_equality(tokens);
-    loop {
-        match tokens.peek() {
-            Some(Token::Operator(Operator::And)) => {
-                tokens.next();
-                let r_factor = parse_equality(tokens);
-                l_factor = Expression::Binary(Operator::And, Box::new(l_factor), Box::new(r_factor))
-            }
-            _ => break,
-        }
+    while let Some(Token::Operator(Operator::And)) = tokens.peek() {
+        tokens.next();
+        let r_factor = parse_equality(tokens);
+        l_factor = Expression::Binary(Operator::And, Box::new(l_factor), Box::new(r_factor))
     }
     l_factor
 }
@@ -192,15 +247,10 @@ pub fn parse_logical_and(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
 // Logical_Or => Logical_And && Logical_And
 pub fn parse_logical_or(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     let mut l_factor = parse_logical_and(tokens);
-    loop {
-        match tokens.peek() {
-            Some(Token::Operator(Operator::Or)) => {
-                tokens.next();
-                let r_factor = parse_logical_and(tokens);
-                l_factor = Expression::Binary(Operator::Or, Box::new(l_factor), Box::new(r_factor))
-            }
-            _ => break,
-        }
+    while let Some(Token::Operator(Operator::Or)) = tokens.peek() {
+        tokens.next();
+        let r_factor = parse_logical_and(tokens);
+        l_factor = Expression::Binary(Operator::Or, Box::new(l_factor), Box::new(r_factor))
     }
     l_factor
 }
@@ -242,6 +292,28 @@ pub fn parse_assignment(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
 
 pub fn parse_expression(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     parse_assignment(tokens)
+}
+
+pub fn parse_expression_list(tokens: &mut PeekableNth<Iter<Token>>) -> Vec<Expression> {
+    let mut list: Vec<Expression> = Vec::new();
+
+    if tokens.peek() == Some(&&Token::Symbol(Symbol::Rparen)) {
+        return list;
+    }
+
+    list.push(parse_expression(tokens));
+
+    loop {
+        if tokens.peek() == Some(&&Token::Symbol(Symbol::Rparen)) {
+            break;
+        } else {
+            match tokens.next() {
+                Some(Token::Symbol(Symbol::Comma)) => list.push(parse_expression(tokens)),
+                _ => panic!("Parameter Error: Expecting , between two parameters"),
+            }
+        }
+    }
+    list
 }
 
 // Expression ; | <Empty> ; | <Empty> )
@@ -299,16 +371,14 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
                 stmts.push(parse_block_item(tokens));
             }
             tokens.next(); // consume }
-            return Statement::Compound(stmts);
+            Statement::Compound(stmts)
         }
         Some(Token::Keyword(Keyword::Return)) => {
             // return expr;
             tokens.next();
             let expr = parse_expression(tokens);
             match tokens.next() {
-                Some(Token::Symbol(Symbol::Semicolon)) => {
-                    return Statement::Return(expr);
-                }
+                Some(Token::Symbol(Symbol::Semicolon)) => Statement::Return(expr),
                 _ => panic!("Statement Err: Expecting ; at the end"),
             }
         }
@@ -360,15 +430,15 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
             }
             let post = parse_expression_option(tokens);
             if tokens.next() != Some(&Token::Symbol(Symbol::Rparen)) {
-                panic!("For Error: Expecting ) after post, Found {:?}");
+                panic!("For Error: Expecting ) after post");
             }
 
-            return Statement::Loop(
+            Statement::Loop(
                 Some(Box::new(pre)),
                 cond,
                 Box::new(parse_statement(tokens)),
                 post,
-            );
+            )
         }
         Some(Token::Keyword(Keyword::While)) => {
             // while(cond) body
@@ -381,7 +451,7 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
                 panic!("While Error: Expecting )")
             }
 
-            return Statement::Loop(None, Some(cond), Box::new(parse_statement(tokens)), None);
+            Statement::Loop(None, Some(cond), Box::new(parse_statement(tokens)), None)
         }
         Some(Token::Keyword(Keyword::Do)) => {
             // do body while(cond)
@@ -401,28 +471,24 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
                 panic!("DoWhile Error: Expecting ;")
             }
 
-            return Statement::Loop(
+            Statement::Loop(
                 Some(Box::new(body.clone())),
                 Some(cond),
                 Box::new(body),
                 None,
-            );
+            )
         }
         Some(Token::Keyword(Keyword::Break)) => {
             tokens.next(); // consume break
             match tokens.next() {
-                Some(Token::Symbol(Symbol::Semicolon)) => {
-                    return Statement::Break;
-                }
+                Some(Token::Symbol(Symbol::Semicolon)) => Statement::Break,
                 _ => panic!("Statement Err: Expecting ; at the end"),
             }
         }
         Some(Token::Keyword(Keyword::Continue)) => {
             tokens.next(); // consume continue
             match tokens.next() {
-                Some(Token::Symbol(Symbol::Semicolon)) => {
-                    return Statement::Continue;
-                }
+                Some(Token::Symbol(Symbol::Semicolon)) => Statement::Continue,
                 _ => panic!("Statement Err: Expecting ; at the end"),
             }
         }
@@ -434,9 +500,7 @@ pub fn parse_statement(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
             // expr ;
             let expr = parse_expression(tokens);
             match tokens.next() {
-                Some(Token::Symbol(Symbol::Semicolon)) => {
-                    return Statement::Expression(Some(expr));
-                }
+                Some(Token::Symbol(Symbol::Semicolon)) => Statement::Expression(Some(expr)),
                 _ => panic!(
                     "Statement Err: Expecting ; at the end. tokens: {:?}",
                     tokens
@@ -450,7 +514,7 @@ pub fn parse_block_item(tokens: &mut PeekableNth<Iter<Token>>) -> Statement {
     match tokens.peek() {
         Some(Token::Type(_)) => {
             let decl = parse_declaration(tokens);
-            return Statement::Declaration(decl);
+            Statement::Declaration(decl)
         }
         _ => parse_statement(tokens),
     }
@@ -461,37 +525,45 @@ pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
         Some(Token::Type(t)) => match t {
             Type::Int => match tokens.next() {
                 Some(Token::Identifier(id)) => match tokens.next() {
-                    Some(Token::Symbol(Symbol::Lparen)) => match tokens.next() {
-                        Some(Token::Symbol(Symbol::Rparen)) => match tokens.next() {
-                            Some(Token::Symbol(Symbol::Lbrace)) => {
-                                let mut statements: Vec<Statement> = Vec::new();
-                                while tokens.peek() != Some(&&Token::Symbol(Symbol::Rbrace)) {
-                                    statements.push(parse_block_item(tokens));
-                                }
-                                // check return
-                                match statements.last() {
-                                    Some(Statement::Return(_)) => (),
-                                    _ => {
-                                        if id == "main" {
-                                            statements.push(Statement::Return(Expression::Const(0)))
+                    Some(Token::Symbol(Symbol::Lparen)) => {
+                        let parameters = parse_parameter(tokens);
+                        match tokens.next() {
+                            Some(Token::Symbol(Symbol::Rparen)) => match tokens.peek() {
+                                Some(Token::Symbol(Symbol::Lbrace)) => {
+                                    if let Statement::Compound(mut statements) =
+                                        parse_statement(tokens)
+                                    {
+                                        // check return
+                                        // UB => always return 0 if undefined
+                                        match statements.last() {
+                                            Some(Statement::Return(_)) => (),
+                                            _ => statements
+                                                .push(Statement::Return(Expression::Const(0))),
                                         }
-                                    }
-                                }
-                                match tokens.next() {
-                                    Some(Token::Symbol(Symbol::Rbrace)) => {
-                                        return Function {
+                                        Function {
                                             t: *t,
                                             name: id.to_owned(),
-                                            statements: statements,
+                                            parameters,
+                                            statements,
                                         }
+                                    } else {
+                                        panic!("Function Error: Not a compound statements")
                                     }
-                                    _ => panic!("Function Err: Expecting }"),
                                 }
-                            }
-                            _ => panic!("Expecting { of Function"),
-                        },
-                        _ => panic!("Expecting ) of Function"),
-                    },
+                                Some(Token::Symbol(Symbol::Semicolon)) => {
+                                    tokens.next(); // consume ;
+                                    Function {
+                                        t: *t,
+                                        name: id.to_owned(),
+                                        parameters,
+                                        statements: Vec::new(),
+                                    }
+                                }
+                                _ => panic!("Expecting { or ; of Function"),
+                            },
+                            _ => panic!("Expecting ) of Function"),
+                        }
+                    }
                     _ => panic!("Expecting ( of Function"),
                 },
                 _ => panic!("Expecting Function name"),
@@ -503,17 +575,20 @@ pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
 }
 
 pub fn parse_program(tokens: &mut PeekableNth<Iter<Token>>) -> Program {
-    let func = parse_function(tokens);
-    if tokens.len() != 0 {
-        if *tokens.next().unwrap() != Token::Symbol(Symbol::EOF) {
-            panic!("Expecting Only One Function Now");
+    let mut functions: Vec<Function> = Vec::new();
+    let mut have_main = false;
+    while tokens.peek().is_some() && *tokens.peek().unwrap() != &Token::Symbol(Symbol::EOF) {
+        functions.push(parse_function(tokens));
+        if let Some(f) = functions.last() {
+            if f.name == "main" {
+                have_main = true;
+            }
         }
     }
-    // Only One Function: main
-    if func.name != "main" {
-        panic!("Expecting main function");
+    if !have_main {
+        panic!("Program Error: No Main Function");
     }
-    Program { function: func }
+    Program { functions }
 }
 
 #[cfg(test)]
@@ -780,6 +855,7 @@ mod tests {
             Function {
                 t: Type::Int,
                 name: "main".to_string(),
+                parameters: Vec::new(),
                 statements: vec![Statement::Return(Expression::Const(0))]
             }
         );

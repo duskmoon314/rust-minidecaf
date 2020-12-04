@@ -1,17 +1,25 @@
+use std::cmp::Ordering;
 use std::io::Result;
 use std::io::Write;
 
 use crate::ir::*;
 
-#[allow(unreachable_patterns)]
-pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
-    let ir_function = &ir_program.function;
+pub fn asm_program(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
     writeln!(w, "    .text")?;
-    writeln!(w, "    .global {}", ir_function.name)?;
+    writeln!(w, "    j     main")?;
+    for func in &ir_program.functions {
+        asm_function(func, w)?;
+    }
+    Ok(())
+}
+
+#[allow(unreachable_patterns)]
+pub fn asm_function(ir_function: &IRFunction, w: &mut impl Write) -> Result<()> {
+    writeln!(w, "\n    .global {}", ir_function.name)?;
     writeln!(w, "{}:", ir_function.name)?;
 
     writeln!(w, "{}_prologue:", ir_function.name)?;
-    let frame_size: u32 = ir_function.var_max * 4 + 8;
+    let frame_size: u32 = (ir_function.var_max - ir_function.param_cnt) * 4 + 8;
     writeln!(w, "    addi  sp, sp, -{}", frame_size)?;
     writeln!(w, "    sw    ra, {}(sp)", frame_size - 4)?;
     writeln!(w, "    sw    fp, {}(sp)", frame_size - 8)?;
@@ -111,12 +119,21 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    sw    t1, 0(sp)")?;
             }
             IRStatement::FrameAddr(idx) => {
-                writeln!(w, "    li    t2, {}", *idx)?;
+                writeln!(w, "    li    t2, {}", idx)?;
                 writeln!(w, "    slli  t2, t2, 2")?;
-                writeln!(w, "    addi  t2, t2, 12")?;
-                writeln!(w, "    sub   t1, fp, t2")?;
-                writeln!(w, "    addi  sp, sp, -4")?;
-                writeln!(w, "    sw    t1, 0(sp)")?;
+                match idx.cmp(&ir_function.param_cnt) {
+                    Ordering::Less => {
+                        writeln!(w, "    add   t1, fp, t2")?;
+                        writeln!(w, "    addi  sp, sp, -4")?;
+                        writeln!(w, "    sw    t1, 0(sp)")?;
+                    }
+                    _ => {
+                        writeln!(w, "    addi  t2, t2, 12")?;
+                        writeln!(w, "    sub   t1, fp, t2")?;
+                        writeln!(w, "    addi  sp, sp, -4")?;
+                        writeln!(w, "    sw    t1, 0(sp)")?;
+                    }
+                }
             }
             IRStatement::Load => {
                 writeln!(w, "    lw    t1, 0(sp)")?;
@@ -147,6 +164,16 @@ pub fn write_asm(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    lw    t1, 0(sp)")?;
                 writeln!(w, "    addi  sp, sp, 4")?;
                 writeln!(w, "    {}  t1, {}", op, l)?;
+            }
+            IRStatement::Call(func_name, params) => {
+                writeln!(w, "    jal   {}", func_name)?;
+                for _i in 1..*params {
+                    writeln!(w, "    addi  sp, sp, 4")?;
+                }
+                if *params == 0 {
+                    writeln!(w, "    addi  sp, sp, -4")?;
+                }
+                writeln!(w, "    sw    a0, 0(sp)")?;
             }
             _ => (),
         }
