@@ -33,7 +33,10 @@ mod tests {
         );
         assert_eq!(
             lex_identifiers("1a"),
-            Err(Err::Error(("1a", nom::error::ErrorKind::RegexpFind)))
+            Err(Err::Error(error_position!(
+                "1a",
+                nom::error::ErrorKind::RegexpFind
+            )))
         );
     }
 }

@@ -5,7 +5,26 @@ use std::io::Write;
 use crate::ir::*;
 
 pub fn asm_program(ir_program: &IRProgram, w: &mut impl Write) -> Result<()> {
-    writeln!(w, "    .text")?;
+    // global vars
+    for (key, value) in ir_program.global_vars.iter() {
+        writeln!(w, "\n# Global Var: {:?}", key)?;
+        match value.init {
+            Some(x) => {
+                writeln!(w, "    .data")?;
+                writeln!(w, "    .global {}", key)?;
+                writeln!(w, "    .align 4")?;
+                writeln!(w, "    .size {}, {}", key, value.size)?;
+                writeln!(w, "{}:", key)?;
+                writeln!(w, "    .word {}", x)?;
+            }
+            None => {
+                writeln!(w, "    .comm {}, {}, 4", key, value.size)?;
+            }
+        }
+    }
+
+    // code
+    writeln!(w, "\n    .text")?;
     writeln!(w, "    j     main")?;
     for func in &ir_program.functions {
         asm_function(func, w)?;
@@ -174,6 +193,11 @@ pub fn asm_function(ir_function: &IRFunction, w: &mut impl Write) -> Result<()> 
                     writeln!(w, "    addi  sp, sp, -4")?;
                 }
                 writeln!(w, "    sw    a0, 0(sp)")?;
+            }
+            IRStatement::GlobalAddr(id) => {
+                writeln!(w, "    addi  sp, sp, -4")?;
+                writeln!(w, "    la    t1, {}", id)?;
+                writeln!(w, "    sw    t1, 0(sp)")?;
             }
             _ => (),
         }

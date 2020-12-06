@@ -3,7 +3,7 @@ use peek_nth::PeekableNth;
 use std::slice::Iter;
 
 /*
- * Program      -> Function*
+ * Program      -> （Function | Declaration)*
  * Function     -> Type Identifier Lparen Parameter_List Rparen (Compound_Statement | ;)
  * Parameter_List -> (Type Identifier (, Type Identifier)*)?
  * Expression_List -> (Expression (, Expression)*)?
@@ -40,6 +40,7 @@ use std::slice::Iter;
 #[derive(Debug, PartialEq)]
 pub struct Program {
     pub functions: Vec<Function>,
+    pub global_vars: Vec<Declaration>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -576,19 +577,36 @@ pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
 
 pub fn parse_program(tokens: &mut PeekableNth<Iter<Token>>) -> Program {
     let mut functions: Vec<Function> = Vec::new();
+    let mut global_vars: Vec<Declaration> = Vec::new();
     let mut have_main = false;
     while tokens.peek().is_some() && *tokens.peek().unwrap() != &Token::Symbol(Symbol::EOF) {
-        functions.push(parse_function(tokens));
-        if let Some(f) = functions.last() {
-            if f.name == "main" {
-                have_main = true;
+        match tokens.peek_nth(2) {
+            Some(Token::Symbol(Symbol::Lparen)) => {
+                functions.push(parse_function(tokens));
+                if let Some(f) = functions.last() {
+                    if f.name == "main" {
+                        have_main = true;
+                    }
+                }
+            }
+            _ => {
+                let decl = parse_declaration(tokens);
+                match decl.expression {
+                    Some(Expression::Const(_)) | None => {
+                        global_vars.push(decl);
+                    }
+                    _ => panic!("Global Variable can only use integer to initialize"),
+                }
             }
         }
     }
     if !have_main {
         panic!("Program Error: No Main Function");
     }
-    Program { functions }
+    Program {
+        functions,
+        global_vars,
+    }
 }
 
 #[cfg(test)]

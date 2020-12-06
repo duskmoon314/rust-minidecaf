@@ -36,6 +36,7 @@ type Label = String;
  * br(str)      : jump to str
  * comment(str) : write "# {str}" to asm file
  * call(str, u32)    : call function name <str>, parameter_cnt: u32
+ * globaladdr id: load global var id addr stack_pointer + 1
  */
 
 #[derive(Debug, PartialEq)]
@@ -67,13 +68,24 @@ pub enum IRStatement {
     Bnez(Label),
     Comment(String),
     Call(String, u32),
+    GlobalAddr(String),
     Return,
 }
+
+#[derive(Debug, PartialEq)]
+pub struct GlobalVarProps {
+    pub init: Option<i32>,
+    pub size: u32,
+}
+
+// GlobalVarMap (var_id, {init?, size})
+type GlobalVarMap = HashMap<String, GlobalVarProps>;
 
 #[derive(Debug, PartialEq)]
 pub struct IRProgram {
     pub functions: Vec<IRFunction>,
     pub label_cnt: u32,
+    pub global_vars: GlobalVarMap,
 }
 
 fn new_label(label_cnt: &mut u32) -> u32 {
@@ -129,11 +141,15 @@ fn new_scope(scope_stack: &mut Vec<Scope>) {
     })
 }
 
-fn lookup(scope_stack: &[Scope], id: &str) -> u32 {
+// (idx, is_global)
+fn lookup(scope_stack: &[Scope], global_vars: &GlobalVarMap, id: &str) -> (u32, bool) {
     for s in scope_stack.iter().rev() {
         if let Some(i) = s.lookup(id) {
-            return i;
+            return (i, false);
         }
+    }
+    if global_vars.contains_key(id) {
+        return (0, true);
     }
     panic!("Var {} Not Found", id);
 }
@@ -200,6 +216,7 @@ pub struct IRFunction {
 struct FunctionStaticProps<'a> {
     name: &'a str,
     function_map: &'a FunctionMap,
+    global_vars: &'a GlobalVarMap,
     loop_label: Vec<(u32, u32)>,
     var_max: u32,
 }
@@ -210,9 +227,39 @@ pub fn ir(program: &Program) -> IRProgram {
     let mut scope_stack: Vec<Scope> = Vec::new();
     let mut functions: Vec<IRFunction> = Vec::new();
     let mut function_map = FunctionMap::new();
+    let mut global_vars = GlobalVarMap::new();
+
+    for g in &program.global_vars {
+        if global_vars
+            .insert(
+                g.name.to_owned(),
+                GlobalVarProps {
+                    init: match g.expression {
+                        None => None,
+                        Some(Expression::Const(x)) => Some(x),
+                        _ => panic!("can't be"),
+                    },
+                    size: match g.t {
+                        Type::Int => 4,
+                        _ => panic!("Unimplemented"),
+                    },
+                },
+            )
+            .is_some()
+        {
+            panic!("Global Var Declaration Error: Redefine Var {}", g.name);
+        }
+    }
+
     for f in &program.functions {
         let idx = new_fun(&mut function_map, &mut function_cnt, f);
-        let func = ir_func(f, &mut label_cnt, &mut scope_stack, &function_map);
+        let func = ir_func(
+            f,
+            &mut label_cnt,
+            &mut scope_stack,
+            &function_map,
+            &global_vars,
+        );
         if idx == functions.len() as u32 + 1 {
             functions.push(func);
         } else {
@@ -223,6 +270,7 @@ pub fn ir(program: &Program) -> IRProgram {
     IRProgram {
         functions,
         label_cnt,
+        global_vars,
     }
 }
 
@@ -231,7 +279,11 @@ pub fn ir_func(
     label_cnt: &mut u32,
     scope_stack: &mut Vec<Scope>,
     function_map: &FunctionMap,
+    global_vars: &GlobalVarMap,
 ) -> IRFunction {
+    if global_vars.contains_key(&function.name) {
+        panic!("Function Global Var Conflict: Same identifier {function.name}");
+    }
     scope_stack.push(Scope {
         symbol_map: SymbolMap::new(),
         parent_var_cnt: 0,
@@ -240,6 +292,7 @@ pub fn ir_func(
     let mut props = FunctionStaticProps {
         name: &function.name,
         function_map,
+        global_vars,
         loop_label: Vec::new(),
         var_max: 0,
     };
@@ -470,14 +523,20 @@ fn ir_expr(
             }
         }
         Expression::Variable(id) => {
-            let idx = lookup(scope_stack, id);
-            ir_statements.push(IRStatement::FrameAddr(idx));
+            let (idx, is_global) = lookup(scope_stack, props.global_vars, id);
+            match is_global {
+                true => ir_statements.push(IRStatement::GlobalAddr(id.to_owned())),
+                false => ir_statements.push(IRStatement::FrameAddr(idx)),
+            }
             ir_statements.push(IRStatement::Load);
         }
         Expression::Assignment(id, expr) => {
             ir_expr(expr, label_cnt, scope_stack, props, ir_statements);
-            let idx = lookup(scope_stack, id);
-            ir_statements.push(IRStatement::FrameAddr(idx));
+            let (idx, is_global) = lookup(scope_stack, props.global_vars, id);
+            match is_global {
+                true => ir_statements.push(IRStatement::GlobalAddr(id.to_owned())),
+                false => ir_statements.push(IRStatement::FrameAddr(idx)),
+            }
             ir_statements.push(IRStatement::Store);
         }
         Expression::Ternary(cond, t_expr, f_expr) => {
