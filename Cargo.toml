@@ -1,7 +1,15 @@
 [package]
 name = "minidecaf"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Campbell He <hkp18@mails.tsinghua.edu.cn>"]
 edition = "2018"
 
 [dependencies]
+clap = "3.0.0-beta.2"
+chrono = "0.4"
+regex = "1"
+peek-nth = "0.2"
+
+[dependencies.nom]
+version = "6"
+features = ["regexp"]

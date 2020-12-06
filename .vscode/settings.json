@@ -1,5 +1,10 @@
 {
     "cSpell.words": [
+        "Lbrack",
+        "Lparen",
+        "Rbrack",
+        "Rparen",
         "minidecaf"
-    ]
+    ],
+    "rust-analyzer.inlayHints.enable": true
 }
