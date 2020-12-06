@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "bungcip.better-toml",
+    "matklad.rust-analyzer",
+    "rust-lang.rust",
+    "vadimcn.vscode-lldb"
+  ],
+  "unwantedRecommendations": []
+}

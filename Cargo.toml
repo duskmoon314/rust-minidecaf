@@ -1,0 +1,7 @@
+[package]
+name = "minidecaf"
+version = "0.0.0"
+authors = ["Campbell He <hkp18@mails.tsinghua.edu.cn>"]
+edition = "2018"
+
+[dependencies]
