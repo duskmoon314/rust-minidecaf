@@ -1,14 +1,18 @@
+/*!
+```markdown
+Program      -> Function
+Function     -> Type Identifier Lparen Rparen Lbrace Statement Rbrace
+Type         -> Type(Int | Double)
+Statement    -> Return Expression Semicolon
+Expression   -> Factor
+Factor       -> | Integer(i32)
+                | (~ ! -) Factor
+```
+*/
+
 use crate::lexer::token::*;
 use peek_nth::PeekableNth;
 use std::slice::Iter;
-
-/**
-- Program      -> Function
-- Function     -> Type Identifier Lparen Rparen Lbrace Statement Rbrace
-- Type         -> Type(Int | Double)
-- Statement    -> Return Expression Semicolon
-- Expression   -> Integer(i32)
-*/
 
 #[derive(Debug, PartialEq)]
 pub struct Program {
@@ -30,9 +34,10 @@ pub enum Statement {
 #[derive(Debug, PartialEq)]
 pub enum Expression {
     Const(i32),
+    Unary(Operator, Box<Expression>),
 }
 
-/// Factor => (<expression>) | Const(i32)
+/// Factor => (<expression>) | Unary | Const(i32)
 fn parse_factor(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     match tokens.next() {
         Some(next) => match next {
@@ -40,17 +45,22 @@ fn parse_factor(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
                 // ( <expression> )
                 let expr = parse_expression(tokens);
                 match tokens.next() {
-                    Some(Token::Symbol(Symbol::Rparen)) => return expr,
+                    Some(Token::Symbol(Symbol::Rparen)) => expr,
                     Some(_) | None => panic!("Expression Error: Missing ) to close expression"),
                 }
             }
-            Token::Integer(num) => return Expression::Const(*num), // <int>
+            Token::Operator(unary_op) if unary_op.is_unary() => {
+                let expr = parse_factor(tokens);
+                Expression::Unary(*unary_op, Box::new(expr))
+            }
+            Token::Integer(num) => Expression::Const(*num), // <int>
             _ => panic!("Expression Error: Expected factor, Nothing found"),
         },
         _ => panic!("Nothing Left"),
     }
 }
 
+/// Expression => Factor
 fn parse_expression(tokens: &mut PeekableNth<Iter<Token>>) -> Expression {
     parse_factor(tokens)
 }
@@ -81,13 +91,11 @@ pub fn parse_function(tokens: &mut PeekableNth<Iter<Token>>) -> Function {
                             Some(Token::Symbol(Symbol::Lbrace)) => {
                                 let stat = parse_statement(tokens);
                                 match tokens.next() {
-                                    Some(Token::Symbol(Symbol::Rbrace)) => {
-                                        return Function {
-                                            t: *t,
-                                            name: id.to_owned(),
-                                            statement: stat,
-                                        }
-                                    }
+                                    Some(Token::Symbol(Symbol::Rbrace)) => Function {
+                                        t: *t,
+                                        name: id.to_owned(),
+                                        statement: stat,
+                                    },
                                     _ => panic!("Expecting } of Function"),
                                 }
                             }

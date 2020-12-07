@@ -1,6 +1,7 @@
 pub mod identifiers;
 pub mod keywords;
 pub mod number;
+pub mod operators;
 pub mod symbols;
 pub mod token;
 pub mod types;
@@ -19,6 +20,7 @@ pub fn lex_all(input: &str) -> IResult<&str, token::Token> {
             keywords::lex_keywords,
             types::lex_types,
             identifiers::lex_identifiers,
+            operators::lex_operators,
             number::lex_integers,
         ))(input)?;
         Ok((reset, tk))

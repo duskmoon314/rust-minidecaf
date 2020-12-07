@@ -1,4 +1,5 @@
 use super::command::*;
+use crate::lexer::token::*;
 use crate::parser::ast::*;
 
 #[derive(Debug)]
@@ -36,8 +37,18 @@ fn ir_statements(statement: &Statement, ir_statements: &mut Vec<IRStatement>) {
     }
 }
 
+#[allow(unreachable_patterns)]
 fn ir_expression(expr: &Expression, ir_statements: &mut Vec<IRStatement>) {
     match expr {
         Expression::Const(int32) => ir_statements.push(IRStatement::Push(*int32)),
+        Expression::Unary(unary_op, left) => {
+            ir_expression(left, ir_statements);
+            match *unary_op {
+                Operator::Minus => ir_statements.push(IRStatement::Neg),
+                Operator::Not => ir_statements.push(IRStatement::LogicalNot),
+                Operator::BitwiseNot => ir_statements.push(IRStatement::Not),
+                _ => panic!("Expecting unary operators"),
+            };
+        }
     }
 }

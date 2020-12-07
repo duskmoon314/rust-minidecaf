@@ -26,6 +26,17 @@ fn asm_function(ir_function: &IRFunction, w: &mut impl Write) -> Result<()> {
                 writeln!(w, "    addi  sp, sp, 4")?;
                 writeln!(w, "    jr    ra")?;
             }
+            IRStatement::Neg | IRStatement::Not | IRStatement::LogicalNot => {
+                let op = match s {
+                    IRStatement::Neg => "neg",
+                    IRStatement::Not => "not",
+                    IRStatement::LogicalNot => "seqz",
+                    _ => panic!("Expecting unary operator"),
+                };
+                writeln!(w, "    lw    t1, 0(sp)")?;
+                writeln!(w, "    {}   t1, t1", op)?;
+                writeln!(w, "    sw    t1, 0(sp)")?;
+            }
         }
     }
     Ok(())
